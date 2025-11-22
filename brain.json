@@ -2,11 +2,11 @@
     "cash": 25000.0,
     "holdings": {},
     "params": {
-        "rsi_buy": 47,
-        "stop_loss_atr": 2.8446138561524394,
-        "monte_carlo_threshold": 58
+        "rsi_buy": 29,
+        "stop_loss_atr": 2.150237245892469,
+        "monte_carlo_threshold": 55
     },
-    "best_pnl_found": 15.606953746418867,
+    "best_pnl_found": 5776.329378389055,
     "stats": {
         "wins": 0,
         "losses": 0

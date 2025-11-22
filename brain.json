@@ -1,24 +1,83 @@
 {
-    "cash": 25000.0,
+    "cash": 50000.0,
     "holdings": {},
-    "params": {
-        "rsi_buy": 51,
-        "stop_loss_atr": 2.8533661303241953,
-        "tp_atr": 5.746198983512288
-    },
-    "last_prices": {},
-    "generation": 131,
-    "best_pnl_found": 5776.329378389055,
-    "stats": {
-        "wins": 0,
-        "losses": 0
-    },
-    "strategies": {
-        "QUANTUM": {
-            "score": 10
+    "knowledge_base": {
+        "MID|BULL_STRONG|LOW": {
+            "wins": 10,
+            "total": 46
         },
-        "MEAN": {
-            "score": 10
+        "MID|BULL_WEAK|LOW": {
+            "wins": 17,
+            "total": 44
+        },
+        "MID|BEAR_WEAK|LOW": {
+            "wins": 19,
+            "total": 42
+        },
+        "HIGH|BULL_STRONG|LOW": {
+            "wins": 6,
+            "total": 16
+        },
+        "MID|BEAR_STRONG|LOW": {
+            "wins": 21,
+            "total": 40
+        },
+        "MID|BEAR_WEAK|HIGH": {
+            "wins": 3,
+            "total": 16
+        },
+        "MID|BULL_STRONG|HIGH": {
+            "wins": 21,
+            "total": 57
+        },
+        "MID|BEAR_STRONG|HIGH": {
+            "wins": 25,
+            "total": 76
+        },
+        "HIGH|BULL_WEAK|LOW": {
+            "wins": 4,
+            "total": 5
+        },
+        "LOW|BEAR_STRONG|HIGH": {
+            "wins": 14,
+            "total": 27
+        },
+        "HIGH|BEAR_WEAK|LOW": {
+            "wins": 0,
+            "total": 2
+        },
+        "MID|BULL_WEAK|HIGH": {
+            "wins": 7,
+            "total": 16
+        },
+        "LOW|BEAR_WEAK|HIGH": {
+            "wins": 0,
+            "total": 1
+        },
+        "HIGH|BULL_STRONG|HIGH": {
+            "wins": 5,
+            "total": 6
+        },
+        "LOW|BEAR_STRONG|LOW": {
+            "wins": 0,
+            "total": 1
+        },
+        "LOW|BEAR_WEAK|LOW": {
+            "wins": 0,
+            "total": 1
+        },
+        "HIGH|BEAR_STRONG|HIGH": {
+            "wins": 1,
+            "total": 2
+        },
+        "HIGH|BEAR_WEAK|HIGH": {
+            "wins": 1,
+            "total": 1
+        },
+        "HIGH|BULL_WEAK|HIGH": {
+            "wins": 0,
+            "total": 1
         }
-    }
+    },
+    "total_xp": 400
 }

@@ -1,14 +1,15 @@
 {
     "cash": 25000.0,
     "holdings": {},
+    "params": {
+        "rsi_buy": 31,
+        "stop_loss_atr": 1.5928976133669215,
+        "monte_carlo_threshold": 53
+    },
+    "best_pnl_found": 2.1075250435306145,
     "stats": {
         "wins": 0,
         "losses": 0
-    },
-    "params": {
-        "rsi_buy": 44,
-        "stop_loss_atr": 3.666273192817899,
-        "monte_carlo_threshold": 60
     },
     "strategies": {
         "QUANTUM": {

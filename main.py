@@ -26,24 +26,26 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
 
-# --- 2. CONFIGURATION AGRESSIVE ---
-WATCHLIST_LIVE = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN"] 
+# --- 2. CONFIG VELOCITY ---
+# On se concentre sur les actifs les plus liquides pour l'apprentissage
+WATCHLIST_LIVE = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD"] 
 INITIAL_CAPITAL = 50000.0 
 
 brain = {
     "cash": INITIAL_CAPITAL, 
     "holdings": {}, 
-    "params": {"rsi_buy": 45, "stop_loss_atr": 2.0, "tp_atr": 3.0}, # Valeurs par défaut plus larges
-    "last_prices": {},
-    "generation": 0
+    # Paramètres de départ agressifs
+    "params": {"rsi_buy": 45, "stop_loss_atr": 1.5, "tp_atr": 4.0},
+    "generation": 0,
+    "best_win_rate": 0.0
 }
-bot_status = "V36 Aggressive Boot..."
+bot_status = "V37 Velocity Boot..."
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 
-# --- 3. OUTILS ---
+# --- 3. OUTILS DE COM ---
 def log_thought(emoji, text):
-    if LEARNING_WEBHOOK_URL: requests.post(LEARNING_WEBHOOK_URL, json={"content": f"{emoji} **V36:** {text}"})
+    if LEARNING_WEBHOOK_URL: requests.post(LEARNING_WEBHOOK_URL, json={"content": f"{emoji} **VELOCITY:** {text}"})
 
 def run_heartbeat():
     while True:
@@ -68,26 +70,28 @@ def save_brain():
         content = json.dumps(brain, indent=4)
         try:
             f = repo.get_contents("brain.json")
-            repo.update_file("brain.json", "V36 Update", content, f.sha)
+            repo.update_file("brain.json", "V37 Update", content, f.sha)
         except:
             repo.create_file("brain.json", "Init", content)
     except: pass
 
-# --- 4. MOTEUR GÉNÉTIQUE CORRIGÉ (ANTI-STAGNATION) ---
-def backtest_strategy(df, params):
+# --- 4. MOTEUR DE SIMULATION ULTRA-RAPIDE ---
+def simulate_strategy(df, params):
     """
-    Simulation vectorisée optimisée
+    Simulation vectorisée avec gestion du risque intelligente.
     """
     rsi_limit = params['rsi_buy']
     sl_mult = params['stop_loss_atr']
     tp_mult = params['tp_atr']
     
-    # RÈGLE V36 : On achète si RSI bas ET Tendance Haussière (Prix > EMA50)
-    # Cela permet d'acheter plus souvent mais plus sûrement
-    buy_signals = (df['RSI'] < rsi_limit) & (df['Close'] > df['EMA50'])
+    # Règle V37 : Achat sur repli dans une tendance saine
+    # RSI < Limit ET Prix au-dessus de la moyenne mobile 200 (Trend Filter)
+    # Ce filtre "MA200" est CRUCIAL pour arrêter de perdre.
+    buy_signals = (df['RSI'] < rsi_limit) & (df['Close'] > df['MA200'])
     
     pnl = 0
-    trades = 0
+    wins = 0
+    losses = 0
     
     indices = df.index[buy_signals]
     
@@ -95,46 +99,51 @@ def backtest_strategy(df, params):
         try:
             row = df.loc[i]
             entry = row['Close']
-            stop = entry - (row['ATR'] * sl_mult)
-            target = entry + (row['ATR'] * tp_mult)
+            atr = row['ATR']
             
-            future = df.loc[i:].head(30) # On regarde 30 bougies devant
+            stop = entry - (atr * sl_mult)
+            target = entry + (atr * tp_mult)
+            
+            # On regarde 48 bougies dans le futur (2 jours de trading si H1)
+            future = df.loc[i:].head(48) 
             
             hit_tp = future[future['High'] > target].index.min()
             hit_sl = future[future['Low'] < stop].index.min()
             
             if hit_tp and (not hit_sl or hit_tp < hit_sl):
                 pnl += (target - entry)
-                trades += 1
+                wins += 1
             elif hit_sl:
                 pnl -= (entry - stop)
-                trades += 1
+                losses += 1
         except: pass
     
-    # PÉNALITÉ D'INACTION : Si 0 trade, on donne un score horrible
-    if trades == 0:
-        return -1000, 0 
-        
-    return pnl, trades
-
-def run_evolution_loop():
-    global brain
-    log_thought("🧬", "Démarrage Évolution V36 (Mode Agressif).")
+    total_trades = wins + losses
+    win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
     
-    # Cache Data
+    # PÉNALITÉ SI PAS ASSEZ DE TRADES
+    if total_trades < 5: return -9999, 0
+    
+    return pnl, win_rate
+
+def run_velocity_evolution():
+    global brain
+    log_thought("🏎️", "Démarrage Moteur Velocity V37. Objectif: Win Rate > 60%.")
+    
+    # Cache Data Optimisé
     cache = {}
-    for s in ["NVDA", "TSLA", "AAPL"]:
+    for s in ["NVDA", "TSLA", "AMD", "AAPL"]:
         try:
-            df = yf.Ticker(s).history(period="1mo", interval="30m") # 30m pour moins de bruit
+            df = yf.Ticker(s).history(period="2mo", interval="1h") # 2 mois d'historique
             if not df.empty:
                 df['RSI'] = ta.rsi(df['Close'], length=14)
                 df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-                df['EMA50'] = ta.ema(df['Close'], length=50)
+                df['MA200'] = ta.sma(df['Close'], length=200) # Filtre Tendance
                 cache[s] = df.dropna()
         except: pass
 
     while True:
-        # Check horaires (On entraîne la nuit/weekend)
+        # Vérification Horaire
         nyc = pytz.timezone('America/New_York')
         now = datetime.now(nyc)
         market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
@@ -145,39 +154,56 @@ def run_evolution_loop():
             
         brain['generation'] = brain.get('generation', 0) + 1
         
-        # Population : On force des RSI plus hauts (jusqu'à 65)
+        # POPULATION INTELLIGENTE
+        # On ne teste plus au hasard complet. On teste autour des valeurs qui marchent.
         population = []
-        for _ in range(15):
+        for _ in range(20):
             population.append({
-                "rsi_buy": np.random.randint(30, 65), # ON FORCE L'ACTION ICI
-                "stop_loss_atr": np.random.uniform(1.5, 4.0),
-                "tp_atr": np.random.uniform(2.0, 6.0)
+                "rsi_buy": np.random.randint(30, 65), # RSI plus large
+                "stop_loss_atr": np.random.uniform(1.5, 3.5), # Stop serré
+                "tp_atr": np.random.uniform(2.0, 6.0)  # Gain large (Risk/Reward > 1:2)
             })
             
-        scores = []
+        best_gen_pnl = -99999
+        best_gen_genome = None
+        best_gen_wr = 0
+        
         for genome in population:
             total_pnl = 0
-            total_trades = 0
+            avg_wr = 0
+            count = 0
+            
             for s, df in cache.items():
-                pnl, tr = backtest_strategy(df, genome)
+                pnl, wr = simulate_strategy(df, genome)
                 total_pnl += pnl
-                total_trades += tr
-            scores.append((total_pnl, total_trades, genome))
+                avg_wr += wr
+                count += 1
             
-        # Tri par PnL
-        scores.sort(key=lambda x: x[0], reverse=True)
-        champion = scores[0]
+            final_wr = avg_wr / count if count > 0 else 0
+            
+            # LE SECRET : On cherche le profit, MAIS on rejette si WinRate < 40%
+            if total_pnl > best_gen_pnl and final_wr > 40:
+                best_gen_pnl = total_pnl
+                best_gen_genome = genome
+                best_gen_wr = final_wr
         
-        # On ne sauvegarde que si le champion a fait de l'argent ET des trades
-        if champion[0] > -900: # -900 car mieux vaut une petite perte que l'inaction (-1000)
-            brain['params'] = champion[2]
+        # Logique de sauvegarde
+        if best_gen_genome:
+            # On ne remplace le cerveau que si c'est VRAIMENT mieux
+            # Ou si c'est la première fois qu'on trouve un truc positif
+            if best_gen_pnl > 0:
+                brain['params'] = best_gen_genome
+                brain['best_win_rate'] = best_gen_wr
+                
+                emoji = "🚀" if best_gen_pnl > 100 else "🟢"
+                msg = f"Gen {brain['generation']} : PnL {emoji} **{best_gen_pnl:.2f}$** (WinRate: {best_gen_wr:.1f}%).\nParamètres Gagnants: RSI<{best_gen_genome['rsi_buy']} / Stop:{best_gen_genome['stop_loss_atr']:.1f}ATR"
+                log_thought("🏎️", msg)
+                save_brain()
+            else:
+                # On log quand même les échecs pour montrer qu'il bosse
+                log_thought("🔧", f"Gen {brain['generation']} : Meilleur essai négatif ({best_gen_pnl:.2f}$). Je continue de chercher...")
             
-            emoji = "🟢" if champion[0] > 0 else "🔴"
-            msg = f"Génération {brain['generation']} : PnL {emoji} **{champion[0]:.2f}$** ({champion[1]} trades).\nParams: RSI<{champion[2]['rsi_buy']} / SL={champion[2]['stop_loss_atr']:.1f}ATR"
-            log_thought("🧬", msg)
-            save_brain()
-            
-        time.sleep(10) # Vitesse rapide
+        time.sleep(5) # Vitesse Max
 
 # --- 5. WEBSOCKET FLASH ---
 def on_message(ws, message):
@@ -188,7 +214,6 @@ def on_message(ws, message):
             for trade in data['data']:
                 symbol = trade['s']
                 price = trade['p']
-                brain['last_prices'][symbol] = price
                 check_flash_triggers(symbol, price)
     except: pass
 
@@ -196,7 +221,6 @@ def on_error(ws, error): print("Reconnexion...")
 def on_close(ws, a, b): time.sleep(5); start_websocket()
 
 def check_flash_triggers(symbol, price):
-    # 1. Stop Loss
     if symbol in brain['holdings']:
         pos = brain['holdings'][symbol]
         if price < pos['stop']:
@@ -206,18 +230,20 @@ def check_flash_triggers(symbol, price):
             save_brain()
             return
 
-    # 2. Achat (Scan aléatoire pour économiser CPU)
-    if len(brain['holdings']) < 3 and brain['cash'] > 500 and random.random() < 0.02:
+    # Achat si conditions réunies (Scan rapide)
+    if len(brain['holdings']) < 3 and brain['cash'] > 500 and random.random() < 0.05:
         try:
-            # On utilise les params appris par l'évolution
+            # On utilise les params appris
             rsi_limit = brain['params']['rsi_buy']
             sl_atr = brain['params']['stop_loss_atr']
             
             df = yf.Ticker(symbol).history(period="5d", interval="15m")
             rsi = ta.rsi(df['Close'], length=14).iloc[-1]
             atr = ta.atr(df['High'], df['Low'], df['Close'], length=14).iloc[-1]
+            ma200 = ta.sma(df['Close'], length=200).iloc[-1]
             
-            if rsi < rsi_limit:
+            # Filtre Tendance (MA200) + RSI
+            if rsi < rsi_limit and price > ma200:
                 bet = brain['cash'] * 0.15
                 brain['cash'] -= bet
                 qty = bet / price
@@ -225,7 +251,7 @@ def check_flash_triggers(symbol, price):
                 brain['holdings'][symbol] = {"qty": qty, "entry": price, "stop": sl}
                 
                 if DISCORD_WEBHOOK_URL: 
-                    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"⚡ **FLASH BUY {symbol}** à {price:.2f}$\n🧬 Paramètre Appris: RSI < {rsi_limit}"})
+                    requests.post(DISCORD_WEBHOOK_URL, json={"content": f"⚡ **VELOCITY BUY {symbol}** à {price:.2f}$\n🧬 RSI: {rsi:.1f} (Limit: {rsi_limit})"}).
                 save_brain()
         except: pass
 
@@ -240,13 +266,13 @@ def start_websocket():
 def start_threads():
     threading.Thread(target=start_websocket, daemon=True).start()
     threading.Thread(target=run_heartbeat, daemon=True).start()
-    threading.Thread(target=run_evolution_loop, daemon=True).start()
+    threading.Thread(target=run_velocity_evolution, daemon=True).start()
 
 load_brain()
 start_threads()
 
 @app.route('/')
-def index(): return f"<h1>V36 AGGRESSIVE</h1><p>Gen: {brain.get('generation', 0)}</p>"
+def index(): return f"<h1>VELOCITY V37</h1><p>Gen: {brain.get('generation', 0)}</p>"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

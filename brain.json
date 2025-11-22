@@ -1,0 +1,16 @@
+{
+    "cash": 25000.0,
+    "holdings": {},
+    "stats": {
+        "wins": 0,
+        "losses": 0
+    },
+    "strategies": {
+        "QUANTUM": {
+            "score": 10
+        },
+        "MEAN": {
+            "score": 10
+        }
+    }
+}

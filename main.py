@@ -16,9 +16,10 @@ from github import Github
 
 app = Flask(__name__)
 
-# --- 1. LES CLÉS SECRÈTES (Render les remplira) ---
+# --- 1. LES CLÉS (AVEC LE NOUVEAU HEARTBEAT) ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL") # Canal Trading
+HEARTBEAT_WEBHOOK_URL = os.environ.get("HEARTBEAT_WEBHOOK_URL") # Canal Status (Nouveau)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
 
@@ -31,6 +32,19 @@ brain = {"cash": INITIAL_CAPITAL, "holdings": {}, "stats": {"wins": 0, "losses":
 bot_status = "Démarrage..."
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
+
+# --- 💓 MODULE HEARTBEAT (NOUVEAU) ---
+def run_heartbeat():
+    """Envoie un signal de vie toutes les 10 secondes sur le 2ème canal"""
+    print("💓 Heartbeat activé.")
+    while True:
+        try:
+            if HEARTBEAT_WEBHOOK_URL:
+                # On envoie juste un emoji pour ne pas spammer du texte
+                requests.post(HEARTBEAT_WEBHOOK_URL, json={"content": "💓"})
+            time.sleep(10) # Pause de 10 secondes
+        except:
+            time.sleep(10)
 
 # --- 3. MÉMOIRE GITHUB ---
 def load_brain():
@@ -54,19 +68,17 @@ def save_brain():
             repo.create_file("brain.json", "Init", content)
     except: pass
 
-# --- 4. ANALYSE MONTE CARLO & QUANTIQUE ---
+# --- 4. ANALYSE OMEGA ---
 def get_data(s):
     try:
         df = yf.Ticker(s).history(period="1mo", interval="15m")
         if df.empty: return None
         
-        # Monte Carlo (Prédiction Futur)
         returns = df['Close'].pct_change().dropna()
         last = df['Close'].iloc[-1]
         sims = last * (1 + np.random.normal(returns.mean(), returns.std(), 1000))
-        prob_up = np.sum(sims > last) / 10 # Pourcentage
+        prob_up = np.sum(sims > last) / 10 
         
-        # Z-Score (Statistique)
         mean = df['Close'].rolling(20).mean()
         std = df['Close'].rolling(20).std()
         z = (last - mean.iloc[-1]) / std.iloc[-1]
@@ -88,8 +100,8 @@ def ask_omega(d):
         return json.loads(res.text.replace("```json","").replace("```",""))
     except: return {"decision": "WAIT"}
 
-# --- 6. MOTEUR ---
-def run():
+# --- 6. MOTEUR TRADING ---
+def run_trading():
     global brain, bot_status
     load_brain()
     count = 0
@@ -103,7 +115,6 @@ def run():
                 pos = brain['holdings'][s]
                 curr = yf.Ticker(s).fast_info['last_price']
                 
-                # Stop Loss Dynamique
                 if curr < pos['stop']:
                     brain['cash'] += pos['qty'] * curr
                     del brain['holdings'][s]
@@ -122,7 +133,6 @@ def run():
                         if d:
                             dec = ask_omega(d)
                             if dec['decision'] == "BUY" and d['prob'] > 60 and brain['cash'] > 500:
-                                # Mise Kelly
                                 bet = brain['cash'] * 0.15 
                                 brain['cash'] -= bet
                                 qty = bet / d['p']
@@ -140,11 +150,18 @@ def run():
 @app.route('/')
 def index(): return f"<h1>OMEGA V26</h1><p>{bot_status}</p><p>Cash: {brain['cash']:.2f}</p>"
 
-def start():
-    t = threading.Thread(target=run)
-    t.daemon = True
-    t.start()
-start()
+def start_threads():
+    # Thread 1 : Le Trading (Cerveau)
+    t1 = threading.Thread(target=run_trading)
+    t1.daemon = True
+    t1.start()
+    
+    # Thread 2 : Le Heartbeat (Pouls)
+    t2 = threading.Thread(target=run_heartbeat)
+    t2.daemon = True
+    t2.start()
+
+start_threads()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

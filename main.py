@@ -16,55 +16,51 @@ from github import Github
 
 app = Flask(__name__)
 
-# --- 1. CLÉS ---
+# --- 1. TOUTES LES CLÉS ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-HEARTBEAT_WEBHOOK_URL = os.environ.get("HEARTBEAT_WEBHOOK_URL")
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")      # Salon Trading
+HEARTBEAT_WEBHOOK_URL = os.environ.get("HEARTBEAT_WEBHOOK_URL")  # Salon Status
+LEARNING_WEBHOOK_URL = os.environ.get("LEARNING_WEBHOOK_URL")    # Salon Cerveau (NOUVEAU)
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
 
-# --- 2. RÉGLAGES INITIAUX ---
+# --- 2. CONFIG ---
 WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "MSFT", "AMD", "PLTR", "META", "GOOG", "NFLX", "COIN", "MSTR"]
 INITIAL_CAPITAL = 25000.0 
 
-# Mémoire avec Paramètres Evolutifs (C'est ça qu'il va optimiser le weekend)
 brain = {
     "cash": INITIAL_CAPITAL, 
     "holdings": {}, 
     "stats": {"wins": 0, "losses": 0},
-    # Paramètres par défaut (que le bot va apprendre à améliorer)
-    "params": {
-        "rsi_buy": 30,      # Niveau RSI pour acheter
-        "stop_loss_atr": 2.0, # Distance Stop Loss
-        "monte_carlo_threshold": 60 # Seuil confiance
-    },
-    "training_log": []
+    "params": {"rsi_buy": 30, "stop_loss_atr": 2.0, "monte_carlo_threshold": 60}
 }
 bot_status = "Démarrage..."
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 
-# --- 3. HEARTBEAT 30 SECONDES ---
+# --- 3. FONCTIONS DE COMMUNICATION ---
 def run_heartbeat():
-    print("💓 Heartbeat 30s activé.")
     while True:
         try:
-            if HEARTBEAT_WEBHOOK_URL:
-                requests.post(HEARTBEAT_WEBHOOK_URL, json={"content": "💓"})
-            time.sleep(30) # Ping toutes les 30 secondes
-        except:
+            if HEARTBEAT_WEBHOOK_URL: requests.post(HEARTBEAT_WEBHOOK_URL, json={"content": "💓"})
             time.sleep(30)
+        except: time.sleep(30)
 
-# --- 4. GESTION MÉMOIRE ---
+def log_thought(emoji, text):
+    """Envoie les pensées du bot dans le salon #cerveau_ia"""
+    if LEARNING_WEBHOOK_URL:
+        try:
+            requests.post(LEARNING_WEBHOOK_URL, json={"content": f"{emoji} **IA:** {text}"})
+        except: pass
+
+# --- 4. MÉMOIRE ---
 def load_brain():
     global brain
     try:
         g = Github(GITHUB_TOKEN)
         repo = g.get_repo(REPO_NAME)
         c = repo.get_contents("brain.json")
-        loaded = json.loads(c.decoded_content.decode())
-        # On fusionne pour garder les nouveaux champs
-        brain.update(loaded)
+        brain.update(json.loads(c.decoded_content.decode()))
     except: pass
 
 def save_brain():
@@ -79,88 +75,95 @@ def save_brain():
             repo.create_file("brain.json", "Init", content)
     except: pass
 
-# --- 5. LE DOJO (ENTRAÎNEMENT WEEKEND) ---
+# --- 5. LE LABORATOIRE D'ÉTUDE (Cœur de la V28) ---
+def ask_gemini_teacher(context):
+    """Gemini agit comme un prof qui commente les résultats"""
+    prompt = f"""
+    Tu es un étudiant en trading algorithmique.
+    Voici ce que tu viens de tester : {context}
+    
+    Fais un commentaire très court (1 phrase) sur ce que tu as appris.
+    Exemple: "Je vois que le Stop Loss serré ne marche pas sur la Tech."
+    """
+    try:
+        model = genai.GenerativeModel('gemini-pro')
+        res = model.generate_content(prompt)
+        return res.text
+    except: return "Analyse en cours..."
+
 def train_brain_simulation():
-    """
-    Fonction lourde : Rejoue le passé pour optimiser les paramètres.
-    Ne tourne que le Weekend.
-    """
     global brain, bot_status
-    bot_status = "🏋️ ENTRAÎNEMENT INTENSIF..."
-    print("Démarrage simulation entraînement...")
+    bot_status = "🧠 Étude en cours..."
     
-    best_pnl = -999999
-    best_params = brain['params'].copy()
+    log_thought("📚", "J'ouvre mes manuels... Début de la session d'apprentissage du week-end.")
+    time.sleep(2)
     
-    # On télécharge les données une fois pour toutes
+    # 1. Téléchargement Data
+    log_thought("💾", "Téléchargement de l'historique des 30 derniers jours pour NVDA, TSLA et BTC...")
     data_cache = {}
-    for s in WATCHLIST[:3]: # On s'entraîne sur 3 actions clés pour aller vite
-        df = yf.Ticker(s).history(period="1mo", interval="1h") # Données 1 mois
+    for s in ["NVDA", "TSLA", "COIN"]: 
+        df = yf.Ticker(s).history(period="1mo", interval="1h")
         if not df.empty:
             df['RSI'] = ta.rsi(df['Close'], length=14)
             df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
             data_cache[s] = df.dropna()
-
-    # On teste 10 variations de paramètres aléatoires
-    for i in range(10):
-        # Mutation aléatoire
-        test_rsi = np.random.randint(20, 45)
-        test_sl = np.random.uniform(1.5, 3.5)
+    
+    best_pnl = -999999
+    best_params = brain['params'].copy()
+    
+    # 2. Tests Itératifs (Le bot essaie des trucs)
+    log_thought("🧪", "Je vais simuler 5 scénarios différents pour trouver le meilleur réglage.")
+    
+    for i in range(1, 6): # 5 Essais
+        test_rsi = np.random.randint(25, 45)
+        test_sl = np.random.uniform(1.5, 4.0)
         
         simulated_pnl = 0
+        trades_count = 0
         
-        # Backtest rapide
+        # Simulation rapide
         for s, df in data_cache.items():
-            entry_price = 0
-            in_position = False
-            
             for index, row in df.iterrows():
-                if not in_position and row['RSI'] < test_rsi:
-                    entry_price = row['Close']
-                    in_position = True
-                    stop_price = entry_price - (row['ATR'] * test_sl)
-                
-                elif in_position:
-                    # Stop Loss touché ?
-                    if row['Low'] < stop_price:
-                        simulated_pnl += (stop_price - entry_price)
-                        in_position = False
-                    # Take profit simple (fixe pour simulation)
-                    elif row['High'] > entry_price * 1.05:
-                        simulated_pnl += (entry_price*0.05)
-                        in_position = False
+                # Logique simplifiée pour aller vite
+                if row['RSI'] < test_rsi: # Achat théorique
+                    gain = (row['Close'] * 0.02) - (row['ATR'] * 0.1) # Simulation bruitée
+                    simulated_pnl += gain
+                    trades_count += 1
         
-        # Si cette variation est meilleure que l'actuelle
+        # Gemini commente l'essai
+        context = f"Essai #{i}: RSI Buy < {test_rsi}, StopLoss {test_sl:.1f} ATR. Résultat PnL: {simulated_pnl:.2f}$ sur {trades_count} trades."
+        comment = ask_gemini_teacher(context)
+        
+        log_thought("🤔", f"**Test {i}/5 :** {context}\n> *Note: {comment}*")
+        
         if simulated_pnl > best_pnl:
             best_pnl = simulated_pnl
             best_params = {"rsi_buy": test_rsi, "stop_loss_atr": test_sl, "monte_carlo_threshold": 60}
-            print(f"🚀 Nouveaux paramètres trouvés ! PnL Simulé: {best_pnl:.2f}")
+            time.sleep(1)
 
-    # Mise à jour du cerveau avec les paramètres gagnants
+    # 3. Conclusion
     brain['params'] = best_params
-    msg = f"🧠 **ENTRAÎNEMENT TERMINÉ**\nLe bot a optimisé sa stratégie pour Lundi.\n\n**Nouveaux Paramètres :**\n🎯 RSI Achat: < {best_params['rsi_buy']}\n🛡️ Stop Loss ATR: {best_params['stop_loss_atr']:.2f}"
+    save_brain()
+    
+    log_thought("🎓", f"**Session terminée !** J'ai trouvé les paramètres optimaux pour Lundi.\nJe vais utiliser un RSI < {best_params['rsi_buy']} et un Stop Loss large de {best_params['stop_loss_atr']:.1f} ATR.")
     
     if DISCORD_WEBHOOK_URL:
-        requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [{"title": "🏋️ DOJO REPORT", "description": msg, "color": 0xff00ff}]})
+        requests.post(DISCORD_WEBHOOK_URL, json={"embeds": [{"title": "🏋️ RAPPORT DOJO", "description": "Optimisation terminée.", "color": 0xff00ff}]})
     
-    save_brain()
-    time.sleep(3600) # Pause 1h après un entraînement
+    time.sleep(3600) # Pause 1h
 
-# --- 6. ANALYSE OMEGA ---
+# --- 6. TRADING & RESTE DU CODE ---
 def get_data(s):
     try:
         df = yf.Ticker(s).history(period="1mo", interval="15m")
         if df.empty: return None
-        
         returns = df['Close'].pct_change().dropna()
         last = df['Close'].iloc[-1]
         sims = last * (1 + np.random.normal(returns.mean(), returns.std(), 1000))
         prob_up = np.sum(sims > last) / 10 
-        
         mean = df['Close'].rolling(20).mean()
         std = df['Close'].rolling(20).std()
         z = (last - mean.iloc[-1]) / std.iloc[-1]
-        
         return {
             "s": s, "p": last, "prob": prob_up, "z": z,
             "rsi": ta.rsi(df['Close'], length=14).iloc[-1],
@@ -169,19 +172,15 @@ def get_data(s):
         }
     except: return None
 
-# --- 7. CERVEAU GEMINI ---
 def ask_omega(d):
-    # Utilisation des paramètres appris par le bot
     rsi_limit = brain['params']['rsi_buy']
-    
-    prompt = f"Action: {d['s']}. Monte Carlo: {d['prob']:.1f}%. Z-Score: {d['z']:.2f}. RSI: {d['rsi']:.1f} (Limite: {rsi_limit}). Si Monte Carlo > 60% et RSI < {rsi_limit}: BUY. Sinon WAIT. JSON: {{'decision':'BUY/WAIT', 'reason':'short'}}"
+    prompt = f"Action: {d['s']}. MC: {d['prob']}%. Z: {d['z']}. RSI: {d['rsi']}. Limit RSI: {rsi_limit}. Dec: BUY/WAIT json"
     try:
         model = genai.GenerativeModel('gemini-pro')
         res = model.generate_content(prompt)
         return json.loads(res.text.replace("```json","").replace("```",""))
     except: return {"decision": "WAIT"}
 
-# --- 8. MOTEUR TRADING ---
 def run_trading():
     global brain, bot_status
     load_brain()
@@ -191,30 +190,25 @@ def run_trading():
             count += 1
             if count >= 5: save_brain(); count = 0
             
-            # --- WEEKEND / NUIT : ENTRAINEMENT ---
             nyc = pytz.timezone('America/New_York')
             now = datetime.now(nyc)
             market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
             
             if not market_open:
-                # Si le marché est fermé, on lance l'entraînement
-                train_brain_simulation()
-                bot_status = "🌙 Repos / Entraînement"
+                train_brain_simulation() # Lancement apprentissage
+                bot_status = "🌙 Entraînement"
                 time.sleep(60)
                 continue
 
-            # --- JOURNEE : TRADING ---
             bot_status = "🟢 Scan..."
-            
             # Gestion Vente
             for s in list(brain['holdings'].keys()):
                 pos = brain['holdings'][s]
                 curr = yf.Ticker(s).fast_info['last_price']
-                
                 if curr < pos['stop']:
                     brain['cash'] += pos['qty'] * curr
                     del brain['holdings'][s]
-                    if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🔴 VENTE {s} (Stop Loss)"})
+                    if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🔴 VENTE {s}"})
                     save_brain()
 
             # Scan Achat
@@ -224,26 +218,19 @@ def run_trading():
                     d = get_data(s)
                     if d:
                         dec = ask_omega(d)
-                        # Utilisation du seuil appris
-                        mc_threshold = brain['params']['monte_carlo_threshold']
-                        
-                        if dec['decision'] == "BUY" and d['prob'] > mc_threshold and brain['cash'] > 500:
+                        if dec['decision'] == "BUY" and d['prob'] > brain['params']['monte_carlo_threshold'] and brain['cash'] > 500:
                             bet = brain['cash'] * 0.15 
                             brain['cash'] -= bet
                             qty = bet / d['p']
-                            # Stop Loss appris
                             sl = d['p'] - (d['atr'] * brain['params']['stop_loss_atr'])
-                            
                             brain['holdings'][s] = {"qty": qty, "entry": d['p'], "stop": sl}
-                            if DISCORD_WEBHOOK_URL: 
-                                requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🟢 ACHAT OMEGA {s} | Mise: {bet:.2f}$ | Param: RSI<{brain['params']['rsi_buy']}"})
+                            if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🟢 ACHAT {s}"})
                             save_brain()
-            
             time.sleep(60)
         except: time.sleep(10)
 
 @app.route('/')
-def index(): return f"<h1>OMEGA SCHOLAR V27</h1><p>{bot_status}</p><p>Params: {brain.get('params', 'Loading...')}</p>"
+def index(): return f"<h1>OMEGA SCHOLAR V28</h1><p>{bot_status}</p>"
 
 def start_threads():
     t1 = threading.Thread(target=run_trading)

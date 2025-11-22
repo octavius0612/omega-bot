@@ -4,13 +4,13 @@ import yfinance as yf
 import pandas_ta as ta
 import pandas as pd
 import numpy as np
-from scipy.stats import linregress
 import requests
 import google.generativeai as genai
 import json
 import time
 import threading
 import random
+import traceback
 from flask import Flask
 from datetime import datetime, time as dtime
 import pytz
@@ -27,25 +27,28 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
 
-# --- 2. CONFIG ALPHA ---
-WATCHLIST_LIVE = ["NVDA", "TSLA", "AMD", "COIN", "MSTR", "AAPL"] 
+# --- 2. CONFIG ---
+WATCHLIST_LIVE = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR"]
 INITIAL_CAPITAL = 50000.0 
 
+# Structure de Mémoire Avancée
 brain = {
-    "cash": INITIAL_CAPITAL, 
-    "holdings": {}, 
-    # La "Knowledge Base" : La mémoire des situations
-    # Format: "RSI_LOW|TREND_UP|VOL_LOW": {"wins": 5, "losses": 1}
-    "knowledge_base": {},
-    "total_xp": 0
+    "cash": INITIAL_CAPITAL,
+    "holdings": {},
+    # Le portefeuille de stratégies actives (Max 3)
+    "active_strategies": {}, 
+    # Cimetière des mauvaises idées (pour ne pas les refaire)
+    "graveyard": [],
+    "generation": 0
 }
-bot_status = "V39 Alpha Zero Boot..."
+bot_status = "Initialisation du Fonds Quantique..."
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 
 # --- 3. OUTILS ---
 def log_thought(emoji, text):
-    if LEARNING_WEBHOOK_URL: requests.post(LEARNING_WEBHOOK_URL, json={"content": f"{emoji} **ALPHA:** {text}"})
+    print(f"{emoji} {text}")
+    if LEARNING_WEBHOOK_URL: requests.post(LEARNING_WEBHOOK_URL, json={"content": f"{emoji} **QUANTUM FUND:** {text}"})
 
 def run_heartbeat():
     while True:
@@ -61,10 +64,7 @@ def load_brain():
         repo = g.get_repo(REPO_NAME)
         c = repo.get_contents("brain.json")
         loaded = json.loads(c.decoded_content.decode())
-        # Fusion intelligente pour ne pas perdre l'expérience
-        if "knowledge_base" in loaded:
-            brain["knowledge_base"] = loaded["knowledge_base"]
-            brain["total_xp"] = loaded.get("total_xp", 0)
+        if "active_strategies" in loaded: brain.update(loaded)
     except: pass
 
 def save_brain():
@@ -74,208 +74,255 @@ def save_brain():
         content = json.dumps(brain, indent=4)
         try:
             f = repo.get_contents("brain.json")
-            repo.update_file("brain.json", "Alpha Learning", content, f.sha)
+            repo.update_file("brain.json", "Quantum Update", content, f.sha)
         except:
             repo.create_file("brain.json", "Init", content)
     except: pass
 
-# --- 4. LE MOTEUR DE RECONNAISSANCE DE PATTERNS ---
-def get_market_state(row, df_subset):
-    """
-    Transforme les chiffres en une "Signature" unique.
-    Exemple: "RSI:BAS|PENTE:HAUSSE|VOL:CALME"
-    """
-    # 1. RSI
-    rsi = row['RSI']
-    if rsi < 30: rsi_state = "LOW"
-    elif rsi > 70: rsi_state = "HIGH"
-    else: rsi_state = "MID"
+# --- 4. USINE A STRATÉGIES (L'ARCHITECTE) ---
+def generate_new_strategy_idea():
+    """Demande à Gemini d'inventer une stratégie complexe en Python"""
     
-    # 2. Pente (Trend) - Calculée sur les 5 dernières bougies
+    # On donne des briques de base à l'IA
+    indicators = "RSI, EMA50, EMA200, BB_UPPER, BB_LOWER, ATR, ADX, VOLUME"
+    
+    prompt = f"""
+    Agis comme un Quants Developer Senior.
+    Ta mission : Inventer une stratégie de trading algorithmique inédite.
+    
+    Variables disponibles (déjà calculées dans le DataFrame 'row') :
+    - row['RSI'] (0-100)
+    - row['EMA50'], row['EMA200'] (Tendances)
+    - row['BBU'], row['BBL'] (Bandes Bollinger Haute/Basse)
+    - row['ADX'] (Force tendance 0-100)
+    - row['Close'] (Prix actuel)
+    
+    Tâche :
+    Écris SEULEMENT le corps d'une fonction Python qui retourne :
+    - 100 pour ACHAT FORT
+    - 0 pour NEUTRE
+    
+    Le code doit être créatif. Utilise des croisements, des seuils dynamiques.
+    Exemple format attendu (sans markdown) :
+    
+    signal = 0
+    if row['Close'] < row['BBL'] and row['RSI'] < 30: signal = 100
+    if row['ADX'] > 25 and row['Close'] > row['EMA50']: signal = 100
+    """
+    
     try:
-        y = df_subset['Close'].values
-        x = np.arange(len(y))
-        slope, _, _, _, _ = linregress(x, y)
-        if slope > 0.5: trend_state = "BULL_STRONG"
-        elif slope > 0: trend_state = "BULL_WEAK"
-        elif slope < -0.5: trend_state = "BEAR_STRONG"
-        else: trend_state = "BEAR_WEAK"
-    except: trend_state = "FLAT"
-    
-    # 3. Volatilité (ATR relatif au prix)
-    atr_pct = (row['ATR'] / row['Close']) * 100
-    if atr_pct > 1.5: vol_state = "HIGH"
-    else: vol_state = "LOW"
-    
-    # Signature Unique
-    return f"{rsi_state}|{trend_state}|{vol_state}"
+        model = genai.GenerativeModel('gemini-pro')
+        res = model.generate_content(prompt)
+        code = res.text.replace("```python", "").replace("```", "").strip()
+        # On donne un nom cool à la strat
+        name = f"STRAT_GEN_{brain['generation']}_{random.randint(100,999)}"
+        return name, code
+    except: return None, None
 
-def run_alpha_learning():
-    """
-    Apprend en analysant le passé. Il ne cherche pas des paramètres,
-    il cherche des CONFIGURATIONS GAGNANTES.
-    """
-    global brain
-    log_thought("🧠", "Démarrage Alpha Zero. Je cartographie les patterns gagnants...")
-    
-    cache = {}
-    for s in ["NVDA", "TSLA", "MSTR", "AMD"]:
-        try:
-            df = yf.Ticker(s).history(period="2mo", interval="1h")
-            if not df.empty:
-                df['RSI'] = ta.rsi(df['Close'], length=14)
-                df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-                cache[s] = df.dropna()
-        except: pass
-
-    while True:
-        nyc = pytz.timezone('America/New_York')
-        now = datetime.now(nyc)
-        if now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0):
-            time.sleep(300)
-            continue
+def backtest_code(strategy_code):
+    """Teste le code généré sur des données historiques réelles"""
+    try:
+        # Données de test (NVDA sur 1 mois)
+        df = yf.Ticker("NVDA").history(period="1mo", interval="1h")
+        if df.empty: return -999, 0, 0
+        
+        # Calcul des indicateurs pour que le code de l'IA fonctionne
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['EMA50'] = ta.ema(df['Close'], length=50)
+        df['EMA200'] = ta.ema(df['Close'], length=200)
+        df['ADX'] = ta.adx(df['High'], df['Low'], df['Close'])['ADX_14']
+        bb = ta.bbands(df['Close'], length=20)
+        df['BBU'] = bb['BBU_20_2.0']
+        df['BBL'] = bb['BBL_20_2.0']
+        df = df.dropna()
+        
+        capital = 10000
+        position = 0
+        entry_price = 0
+        trades = 0
+        wins = 0
+        
+        # Simulation
+        for index, row in df.iterrows():
+            # Environnement d'exécution sécurisé
+            local_vars = {'row': row, 'signal': 0}
+            try:
+                exec(strategy_code, {}, local_vars)
+                signal = local_vars['signal']
+            except: signal = 0
             
-        # APPRENTISSAGE PROFOND
-        # On parcourt l'historique trade par trade
-        new_xp = 0
+            # Logique Trading simple pour test
+            if position == 0 and signal == 100:
+                position = capital / row['Close']
+                entry_price = row['Close']
+                capital = 0
+            elif position > 0:
+                # Sortie fixe (Take Profit 5% / Stop Loss 3%) pour valider la qualité de l'entrée
+                if row['High'] > entry_price * 1.05:
+                    capital = position * (entry_price * 1.05)
+                    position = 0
+                    trades += 1
+                    wins += 1
+                elif row['Low'] < entry_price * 0.97:
+                    capital = position * (entry_price * 0.97)
+                    position = 0
+                    trades += 1
         
-        for s, df in cache.items():
-            # On prend 100 points au hasard dans le passé pour apprendre
-            sample_indices = random.sample(range(20, len(df)-24), min(100, len(df)-50))
-            
-            for i in sample_indices:
-                # Contexte à l'instant T
-                current_row = df.iloc[i]
-                subset = df.iloc[i-5:i+1] # Pour calculer la pente
-                
-                signature = get_market_state(current_row, subset)
-                
-                # Résultat Futur (24h plus tard)
-                future_row = df.iloc[i+12] # +12 heures (environ)
-                pnl_pct = (future_row['Close'] - current_row['Close']) / current_row['Close']
-                
-                # Enregistrement dans la base de connaissance
-                if signature not in brain['knowledge_base']:
-                    brain['knowledge_base'][signature] = {"wins": 0, "total": 0}
-                
-                brain['knowledge_base'][signature]["total"] += 1
-                if pnl_pct > 0.01: # Si gain > 1%
-                    brain['knowledge_base'][signature]["wins"] += 1
-                
-                new_xp += 1
+        final_value = capital + (position * df['Close'].iloc[-1])
+        pnl = final_value - 10000
+        win_rate = (wins / trades * 100) if trades > 0 else 0
         
-        brain['total_xp'] += new_xp
+        return pnl, trades, win_rate
         
-        # Analyse des découvertes
-        best_pattern = max(brain['knowledge_base'], key=lambda k: brain['knowledge_base'][k]['wins'] if brain['knowledge_base'][k]['total'] > 5 else 0)
-        stats = brain['knowledge_base'][best_pattern]
-        wr = (stats['wins'] / stats['total'] * 100) if stats['total'] > 0 else 0
-        
-        msg = f"Cycle terminé (+{new_xp} simulations).\nPattern Roi: **{best_pattern}**\nWin Rate Historique: **{wr:.1f}%** ({stats['wins']}/{stats['total']})"
-        log_thought("🎓", msg)
-        
-        save_brain()
-        time.sleep(60) # Pause
+    except Exception as e:
+        return -999, 0, 0
 
-# --- 5. WEBSOCKET & TRADING (APPLICATION DU SAVOIR) ---
-def on_message(ws, message):
-    # (Code WebSocket simplifié pour l'exemple, reste actif)
-    pass 
-
-def on_error(ws, error): print("Reconnexion...")
-def on_close(ws, a, b): time.sleep(5); start_websocket()
-
-def start_websocket():
-    websocket.enableTrace(False)
-    ws = websocket.WebSocketApp(f"wss://ws.finnhub.io?token={FINNHUB_API_KEY}",
-                              on_message = on_message, on_error = on_error, on_close = on_close)
-    ws.on_open = lambda ws: [ws.send(json.dumps({"type": "subscribe", "symbol": s})) for s in WATCHLIST_LIVE]
-    ws.run_forever()
-
-def run_trading_logic():
+def manage_strategies_lifecycle():
     """
-    Applique les connaissances en temps réel
+    Le DRH du Hedge Fund : Embauche et Vire des stratégies.
     """
+    global brain, bot_status
+    
+    log_thought("👔", "Réunion du Comité Stratégique. Analyse des performances...")
+    
+    # 1. Élimination des faibles
+    to_delete = []
+    for name, stats in brain['active_strategies'].items():
+        # Si une stratégie perd de l'argent après 10 trades réels -> Poubelle
+        if stats['real_pnl'] < -100:
+            log_thought("🗑️", f"La stratégie {name} a échoué (PnL: {stats['real_pnl']}$). Licenciée.")
+            to_delete.append(name)
+            brain['graveyard'].append(stats['code'])
+    
+    for name in to_delete:
+        del brain['active_strategies'][name]
+    
+    # 2. Recrutement (Si on a de la place, max 3 strats)
+    while len(brain['active_strategies']) < 3:
+        brain['generation'] += 1
+        name, code = generate_new_strategy_idea()
+        if not code: continue
+        
+        log_thought("🧪", f"Test du candidat {name}...")
+        pnl, trades, wr = backtest_code(code)
+        
+        if pnl > 200 and trades > 5: # Critères d'embauche stricts
+            log_thought("🤝", f"**EMBAUCHÉ !** {name} a généré +{pnl:.2f}$ en backtest (WinRate: {wr:.1f}%).")
+            brain['active_strategies'][name] = {
+                "code": code,
+                "backtest_pnl": pnl,
+                "real_pnl": 0.0, # PnL réel commence à 0
+                "trades": 0
+            }
+            save_brain()
+        else:
+            log_thought("❌", f"Candidat {name} rejeté (PnL faible ou bug).")
+            time.sleep(2)
+
+# --- 5. TRADING TEMPS RÉEL ---
+def run_trading_engine():
     global brain, bot_status
     load_brain()
     
     while True:
-        try:
-            nyc = pytz.timezone('America/New_York')
-            now = datetime.now(nyc)
-            market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
-            
-            if not market_open:
-                bot_status = "🌙 Mode Apprentissage"
-                time.sleep(60)
-                continue
-                
-            bot_status = "🟢 Recherche Patterns Connus..."
-            
-            # Gestion Ventes (Classique)
-            for s in list(brain['holdings'].keys()):
-                pos = brain['holdings'][s]
-                curr = yf.Ticker(s).fast_info['last_price']
-                if curr < pos['stop']:
-                    brain['cash'] += pos['qty'] * curr
-                    del brain['holdings'][s]
-                    if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🔴 VENTE {s}"})
-                    save_brain()
-
-            # Scan Achats INTELLIGENT
-            if len(brain['holdings']) < 3:
-                for s in WATCHLIST_LIVE:
-                    if s in brain['holdings']: continue
-                    
-                    try:
-                        # Analyse Temps Réel
-                        df = yf.Ticker(s).history(period="5d", interval="15m")
-                        if df.empty: continue
-                        
-                        df['RSI'] = ta.rsi(df['Close'], length=14)
-                        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-                        
-                        current_row = df.iloc[-1]
-                        subset = df.iloc[-6:]
-                        
-                        # Quelle est la signature actuelle ?
-                        signature = get_market_state(current_row, subset)
-                        
-                        # Est-ce qu'on connait cette signature ?
-                        memory = brain['knowledge_base'].get(signature)
-                        
-                        if memory and memory['total'] > 5: # Il faut au moins 5 exemples passés
-                            win_rate = (memory['wins'] / memory['total']) * 100
-                            
-                            # ON ACHÈTE SEULEMENT SI LE PASSÉ PROUVE QUE ÇA GAGNE > 70% DU TEMPS
-                            if win_rate > 70:
-                                price = current_row['Close']
-                                bet = brain['cash'] * 0.15
-                                brain['cash'] -= bet
-                                qty = bet / price
-                                sl = price - (current_row['ATR'] * 2.0)
-                                
-                                brain['holdings'][s] = {"qty": qty, "entry": price, "stop": sl}
-                                
-                                msg = f"🟢 **ACHAT ALPHA : {s}**\nPattern Reconnu: `{signature}`\nProbabilité Historique: **{win_rate:.1f}%** ({memory['wins']} victoires connues)."
-                                if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
-                                save_brain()
-                    except: pass
-            
+        # Gestion Horaire
+        nyc = pytz.timezone('America/New_York')
+        now = datetime.now(nyc)
+        market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
+        
+        if not market_open:
+            bot_status = "🌙 Bourse Fermée - Recrutement Stratégies"
+            manage_strategies_lifecycle()
             time.sleep(60)
-        except: time.sleep(10)
+            continue
+            
+        bot_status = "🟢 Trading Actif (Multi-Stratégies)"
+        
+        # Scan du marché avec TOUTES les stratégies actives
+        for s in WATCHLIST_LIVE:
+            # On ignore si déjà en portefeuille
+            if s in brain['holdings']: continue
+            
+            try:
+                # Récup Data Live
+                df = yf.Ticker(s).history(period="1mo", interval="15m")
+                if df.empty: continue
+                
+                # Calcul Indicateurs
+                df['RSI'] = ta.rsi(df['Close'], length=14)
+                df['EMA50'] = ta.ema(df['Close'], length=50)
+                df['EMA200'] = ta.ema(df['Close'], length=200)
+                df['ADX'] = ta.adx(df['High'], df['Low'], df['Close'])['ADX_14']
+                bb = ta.bbands(df['Close'], length=20)
+                df['BBU'] = bb['BBU_20_2.0']
+                df['BBL'] = bb['BBL_20_2.0']
+                row = df.iloc[-1]
+                
+                # On demande à chaque stratégie son avis
+                for strat_name, strat_data in brain['active_strategies'].items():
+                    local_vars = {'row': row, 'signal': 0}
+                    try:
+                        exec(strat_data['code'], {}, local_vars)
+                        if local_vars['signal'] == 100:
+                            # BINGO ! Une stratégie veut acheter
+                            price = row['Close']
+                            qty = 200 / price # Mise fixe 200$ pour tester
+                            
+                            # SL/TP Standard
+                            atr = ta.atr(df['High'], df['Low'], df['Close'], length=14).iloc[-1]
+                            sl = price - (atr * 2)
+                            
+                            brain['holdings'][s] = {
+                                "qty": qty, "entry": price, "stop": sl,
+                                "strategy_origin": strat_name # On note qui a pris la décision
+                            }
+                            brain['cash'] -= 200
+                            
+                            msg = f"🟢 **ACHAT {s}** par la stratégie `{strat_name}`\nPrix: {price:.2f}$"
+                            if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
+                            save_brain()
+                            break # Une seule stratégie suffit pour déclencher
+                    except: pass
+            except: pass
+            
+        # Gestion des Ventes (Commune à toutes les strats)
+        for s in list(brain['holdings'].keys()):
+            pos = brain['holdings'][s]
+            curr = yf.Ticker(s).fast_info['last_price']
+            pnl_val = (curr - pos['entry']) * pos['qty']
+            
+            exit = False
+            if curr < pos['stop']: exit = "STOP LOSS"
+            elif curr > pos['entry'] * 1.05: exit = "TAKE PROFIT"
+            
+            if exit:
+                brain['cash'] += pos['qty'] * curr
+                strat_name = pos['strategy_origin']
+                
+                # Mise à jour du score de la stratégie responsable
+                if strat_name in brain['active_strategies']:
+                    brain['active_strategies'][strat_name]['real_pnl'] += pnl_val
+                    brain['active_strategies'][strat_name]['trades'] += 1
+                
+                del brain['holdings'][s]
+                if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🔴 VENTE {s} ({exit}) | PnL: {pnl_val:.2f}$"})
+                save_brain()
+        
+        time.sleep(60)
+
+@app.route('/')
+def index(): 
+    strats = "<br>".join([f"<b>{k}</b>: PnL Réel {v['real_pnl']:.2f}$" for k,v in brain['active_strategies'].items()])
+    return f"<h1>QUANTUM FUND V41</h1><p>{bot_status}</p><h3>Stratégies Actives:</h3>{strats}"
 
 def start_threads():
-    threading.Thread(target=start_websocket, daemon=True).start()
-    threading.Thread(target=run_heartbeat, daemon=True).start()
-    threading.Thread(target=run_alpha_learning, daemon=True).start()
-    threading.Thread(target=run_trading_logic, daemon=True).start()
+    t1 = threading.Thread(target=run_trading_engine, daemon=True)
+    t1.start()
+    t2 = threading.Thread(target=run_heartbeat, daemon=True)
+    t2.start()
 
 load_brain()
 start_threads()
-
-@app.route('/')
-def index(): return f"<h1>ALPHA ZERO V39</h1><p>Patterns Connus: {len(brain.get('knowledge_base', {}))}</p>"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

@@ -2,12 +2,12 @@
     "cash": 25000.0,
     "holdings": {},
     "params": {
-        "rsi_buy": 53,
-        "stop_loss_atr": 1.814895106519456,
-        "tp_atr": 2.3917164193284
+        "rsi_buy": 50,
+        "stop_loss_atr": 1.9197068028084618,
+        "tp_atr": 3.362985744103947
     },
     "last_prices": {},
-    "generation": 51,
+    "generation": 52,
     "best_pnl_found": 5776.329378389055,
     "stats": {
         "wins": 0,

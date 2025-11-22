@@ -1,0 +1,14 @@
+name: Keep Alive
+
+on:
+  schedule:
+    - cron: '*/3 * * * *' # Ping toutes les 3 minutes
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake up Render
+        # ⚠️ REMET BIEN TON URL RENDER ICI ! ⚠️
+        run: curl -I https://omega-bot-unri.onrender.com/

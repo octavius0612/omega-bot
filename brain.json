@@ -3,85 +3,85 @@
     "holdings": {},
     "knowledge_base": {
         "MID|BULL_STRONG|LOW": {
-            "wins": 44,
-            "total": 199
+            "wins": 53,
+            "total": 232
         },
         "MID|BULL_WEAK|LOW": {
-            "wins": 67,
-            "total": 207
+            "wins": 76,
+            "total": 242
         },
         "MID|BEAR_WEAK|LOW": {
-            "wins": 75,
-            "total": 221
+            "wins": 91,
+            "total": 264
         },
         "HIGH|BULL_STRONG|LOW": {
-            "wins": 40,
-            "total": 82
+            "wins": 48,
+            "total": 103
         },
         "MID|BEAR_STRONG|LOW": {
-            "wins": 99,
-            "total": 213
+            "wins": 120,
+            "total": 261
         },
         "MID|BEAR_WEAK|HIGH": {
-            "wins": 30,
-            "total": 97
+            "wins": 36,
+            "total": 116
         },
         "MID|BULL_STRONG|HIGH": {
-            "wins": 108,
-            "total": 276
+            "wins": 129,
+            "total": 338
         },
         "MID|BEAR_STRONG|HIGH": {
-            "wins": 135,
-            "total": 378
+            "wins": 161,
+            "total": 446
         },
         "HIGH|BULL_WEAK|LOW": {
-            "wins": 16,
-            "total": 23
+            "wins": 23,
+            "total": 34
         },
         "LOW|BEAR_STRONG|HIGH": {
-            "wins": 65,
-            "total": 118
+            "wins": 77,
+            "total": 145
         },
         "HIGH|BEAR_WEAK|LOW": {
             "wins": 0,
-            "total": 5
+            "total": 6
         },
         "MID|BULL_WEAK|HIGH": {
-            "wins": 35,
-            "total": 92
+            "wins": 39,
+            "total": 108
         },
         "LOW|BEAR_WEAK|HIGH": {
             "wins": 3,
             "total": 4
         },
         "HIGH|BULL_STRONG|HIGH": {
-            "wins": 34,
-            "total": 54
+            "wins": 42,
+            "total": 65
         },
         "LOW|BEAR_STRONG|LOW": {
             "wins": 0,
-            "total": 6
+            "total": 7
         },
         "LOW|BEAR_WEAK|LOW": {
             "wins": 0,
             "total": 3
         },
         "HIGH|BEAR_STRONG|HIGH": {
-            "wins": 9,
-            "total": 14
+            "wins": 10,
+            "total": 16
         },
         "HIGH|BEAR_WEAK|HIGH": {
-            "wins": 3,
-            "total": 4
+            "wins": 4,
+            "total": 5
         },
         "HIGH|BULL_WEAK|HIGH": {
             "wins": 0,
-            "total": 1
+            "total": 2
         },
         "HIGH|BEAR_STRONG|LOW": {
             "wins": 0,
             "total": 3
         }
     },
-    "total_xp": 2000
+    "total_xp": 2400
 }

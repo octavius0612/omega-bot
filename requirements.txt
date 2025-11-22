@@ -10,5 +10,4 @@ numpy
 scipy
 PyGithub
 textblob
-matplotlib
-mplfinance
+websocket-client

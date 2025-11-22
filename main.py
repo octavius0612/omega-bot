@@ -10,7 +10,6 @@ import json
 import time
 import threading
 import random
-import traceback
 from flask import Flask
 from datetime import datetime, time as dtime
 import pytz
@@ -27,101 +26,37 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
 
-# --- 2. CONFIG FINANCIÈRE ---
-WATCHLIST_LIVE = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR"]
+# --- 2. CONFIG SCALPING ---
+WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMD", "AMZN"] # Les plus liquides pour le scalping
 INITIAL_CAPITAL = 50000.0 
 
 brain = {
-    "cash": INITIAL_CAPITAL,
-    "holdings": {},
-    "active_strategies": {},
-    "graveyard": [],
-    "generation": 0,
-    # Compteur global historique
-    "total_realized_pnl": 0.0
+    "cash": INITIAL_CAPITAL, 
+    "holdings": {}, 
+    "history": [],
+    "total_pnl": 0.0
 }
-bot_status = "Audit Financier en cours..."
+bot_status = "Démarrage Scalper..."
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 
-# --- 3. OUTILS COMMS ---
+# --- 3. COMMS ---
+def send_discord(msg):
+    if DISCORD_WEBHOOK_URL:
+        try: requests.post(DISCORD_WEBHOOK_URL, json=msg)
+        except: pass
+
 def log_thought(emoji, text):
-    print(f"{emoji} {text}")
-    if LEARNING_WEBHOOK_URL: requests.post(LEARNING_WEBHOOK_URL, json={"content": f"{emoji} **FACTORY:** {text}"})
+    if LEARNING_WEBHOOK_URL: requests.post(LEARNING_WEBHOOK_URL, json={"content": f"{emoji} **SCALPER:** {text}"})
 
-def send_financial_report():
-    """Calcule et envoie le bilan total"""
-    global brain
-    
-    # Valeur du Cash
-    total_value = brain['cash']
-    
-    # Valeur des Actions détenues (au prix actuel estimé)
-    unrealized_pnl = 0
-    details = ""
-    
-    if brain['holdings']:
-        for s, pos in brain['holdings'].items():
-            try:
-                current_price = yf.Ticker(s).fast_info['last_price']
-                pos_value = pos['qty'] * current_price
-                total_value += pos_value
-                
-                # Gain latent
-                trade_pnl = pos_value - (pos['qty'] * pos['entry'])
-                unrealized_pnl += trade_pnl
-                
-                emoji = "🟢" if trade_pnl >= 0 else "🔴"
-                details += f"• {s}: {emoji} {trade_pnl:+.2f}$ ({pos['strategy_origin']})\n"
-            except: pass
-            
-    # Calcul PnL Total (Latent + Réalisé)
-    total_pnl = total_value - INITIAL_CAPITAL
-    
-    color = 0x2ecc71 if total_pnl >= 0 else 0xe74c3c
-    
-    msg = {
-        "embeds": [{
-            "title": "💰 BILAN FINANCIER",
-            "color": color,
-            "fields": [
-                {"name": "Profit Total (Net)", "value": f"**{total_pnl:+.2f} $**", "inline": True},
-                {"name": "Capital Actuel", "value": f"{total_value:.2f} $", "inline": True},
-                {"name": "Positions en cours", "value": details if details else "Aucune (100% Cash)", "inline": False},
-                {"name": "Gains déjà encaissés", "value": f"{brain['total_realized_pnl']:+.2f} $", "inline": True}
-            ],
-            "footer": {"text": f"Cash dispo: {brain['cash']:.2f}$"}
-        }]
-    }
-    if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json=msg)
-
-def run_heartbeat():
-    count = 0
-    while True:
-        try:
-            if HEARTBEAT_WEBHOOK_URL: requests.post(HEARTBEAT_WEBHOOK_URL, json={"content": "💓"})
-            
-            # Toutes les 60 minutes (120 * 30s), on envoie le bilan financier
-            count += 1
-            if count >= 120: 
-                send_financial_report()
-                count = 0
-                
-            time.sleep(30)
-        except: time.sleep(30)
-
+# --- 4. MÉMOIRE ---
 def load_brain():
     global brain
     try:
         g = Github(GITHUB_TOKEN)
         repo = g.get_repo(REPO_NAME)
         c = repo.get_contents("brain.json")
-        loaded = json.loads(c.decoded_content.decode())
-        # Fusion prudente
-        if "cash" in loaded: brain["cash"] = loaded["cash"]
-        if "holdings" in loaded: brain["holdings"] = loaded["holdings"]
-        if "active_strategies" in loaded: brain["active_strategies"] = loaded["active_strategies"]
-        if "total_realized_pnl" in loaded: brain["total_realized_pnl"] = loaded["total_realized_pnl"]
+        brain.update(json.loads(c.decoded_content.decode()))
     except: pass
 
 def save_brain():
@@ -131,198 +66,194 @@ def save_brain():
         content = json.dumps(brain, indent=4)
         try:
             f = repo.get_contents("brain.json")
-            repo.update_file("brain.json", "Financial Update", content, f.sha)
+            repo.update_file("brain.json", "Scalp Update", content, f.sha)
         except:
             repo.create_file("brain.json", "Init", content)
     except: pass
 
-# --- 4. USINE A CODE (GENERATION) ---
-def generate_new_strategy_idea():
-    prompt = f"""
-    Agis comme un Quants Developer.
-    TA MISSION : Inventer une stratégie d'achat agressive mais sûre.
-    Variables: row['RSI'], row['EMA50'], row['EMA200'], row['BBU'], row['BBL'], row['ADX'], row['Close']
-    
-    Format de sortie (Code Python brut uniquement) :
-    signal = 0
-    if condition: signal = 100
-    """
+# --- 5. LE MOTEUR SCALPING (1 MINUTE) ---
+def get_scalp_data(s):
     try:
-        model = genai.GenerativeModel('gemini-pro')
-        res = model.generate_content(prompt)
-        code = res.text.replace("```python", "").replace("```", "").strip()
-        name = f"STRAT_V43_{brain['generation']}_{random.randint(10,99)}"
-        return name, code
-    except: return None, None
-
-def backtest_code(strategy_code):
-    try:
-        df = yf.Ticker("NVDA").history(period="1mo", interval="30m")
-        if df.empty: return -999, 0, 0
-        
-        # Indicateurs
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['EMA50'] = ta.ema(df['Close'], length=50)
-        df['EMA200'] = ta.ema(df['Close'], length=200)
-        df['ADX'] = ta.adx(df['High'], df['Low'], df['Close'])['ADX_14']
-        bb = ta.bbands(df['Close'], length=20)
-        df['BBU'] = bb['BBU_20_2.0']
-        df['BBL'] = bb['BBL_20_2.0']
-        df = df.dropna()
-        
-        capital = 10000
-        position = 0
-        entry = 0
-        trades = 0
-        wins = 0
-        
-        for index, row in df.iterrows():
-            local_vars = {'row': row, 'signal': 0}
-            try:
-                exec(strategy_code, {}, local_vars)
-            except: pass
-            
-            if position == 0 and local_vars['signal'] == 100:
-                position = capital / row['Close']
-                entry = row['Close']
-                capital = 0
-            elif position > 0:
-                # TP 4% / SL 2%
-                if row['High'] > entry * 1.04:
-                    capital = position * entry * 1.04
-                    position = 0; trades += 1; wins += 1
-                elif row['Low'] < entry * 0.98:
-                    capital = position * entry * 0.98
-                    position = 0; trades += 1
-                    
-        final = capital + (position * df['Close'].iloc[-1])
-        return final - 10000, trades, (wins/trades*100 if trades else 0)
-    except: return -999, 0, 0
-
-def manage_strategies_lifecycle():
-    global brain
-    
-    # 1. Élimination des pertes
-    to_delete = []
-    for name, stats in brain['active_strategies'].items():
-        if stats['real_pnl'] < -50: # Tolérance zéro
-            log_thought("💸", f"Stratégie {name} virée (Perte: {stats['real_pnl']}$).")
-            to_delete.append(name)
-    for name in to_delete: del brain['active_strategies'][name]
-    
-    # 2. Recrutement
-    if len(brain['active_strategies']) < 3:
-        brain['generation'] += 1
-        name, code = generate_new_strategy_idea()
-        if code:
-            pnl, trades, wr = backtest_code(code)
-            if pnl > 0 and trades > 2:
-                log_thought("🤑", f"**NOUVELLE STRATÉGIE RENTABLE !**\nNom: `{name}`\nBacktest PnL: +{pnl:.2f}$ (WinRate: {wr:.1f}%)")
-                brain['active_strategies'][name] = {"code": code, "real_pnl": 0.0, "trades": 0}
-                save_brain()
-
-# --- 5. TRADING REEL ---
-def get_live_data(s):
-    try:
-        df = yf.Ticker(s).history(period="1mo", interval="15m")
+        # On prend les données 1 minute (Ultra court terme)
+        df = yf.Ticker(s).history(period="1d", interval="1m")
         if df.empty: return None
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['EMA50'] = ta.ema(df['Close'], length=50)
-        df['EMA200'] = ta.ema(df['Close'], length=200)
-        df['ADX'] = ta.adx(df['High'], df['Low'], df['Close'])['ADX_14']
-        bb = ta.bbands(df['Close'], length=20)
-        df['BBU'] = bb['BBU_20_2.0']
-        df['BBL'] = bb['BBL_20_2.0']
+        
+        df['RSI'] = ta.rsi(df['Close'], length=7) # RSI rapide (7 au lieu de 14)
+        df['EMA20'] = ta.ema(df['Close'], length=20) # Tendance immédiate
+        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+        
         return df.iloc[-1]
     except: return None
 
-def run_trading_engine():
+def execute_trade(s, price, side, reason, is_replay=False):
+    global brain
+    
+    tag = "[REPLAY]" if is_replay else "[LIVE]"
+    color = 0x2ecc71 if side == "BUY" else 0xe74c3c
+    
+    if side == "BUY":
+        # On mise 5% du capital pour scalper vite
+        qty = (brain['cash'] * 0.05) / price
+        sl = price * 0.99 # Stop Loss très serré (1%)
+        tp = price * 1.015 # Take Profit rapide (1.5%)
+        
+        brain['holdings'][s] = {"qty": qty, "entry": price, "stop": sl, "tp": tp}
+        brain['cash'] -= (qty * price)
+        
+        msg = {
+            "embeds": [{
+                "title": f"⚡ {tag} SCALP BUY : {s}",
+                "description": f"Raison: {reason}",
+                "color": color,
+                "fields": [
+                    {"name": "Prix", "value": f"{price:.2f}$", "inline": True},
+                    {"name": "Cible", "value": f"{tp:.2f}$ (+1.5%)", "inline": True}
+                ]
+            }]
+        }
+        send_discord(msg)
+        
+    elif side == "SELL":
+        if s in brain['holdings']:
+            pos = brain['holdings'][s]
+            revenue = pos['qty'] * price
+            cost = pos['qty'] * pos['entry']
+            pnl = revenue - cost
+            brain['cash'] += revenue
+            brain['total_pnl'] += pnl
+            del brain['holdings'][s]
+            
+            emoji = "💰" if pnl > 0 else "🩸"
+            msg = {
+                "embeds": [{
+                    "title": f"{emoji} {tag} SCALP SELL : {s}",
+                    "description": f"Raison: {reason}",
+                    "color": color,
+                    "fields": [
+                        {"name": "Résultat", "value": f"**{pnl:+.2f}$**", "inline": True},
+                        {"name": "Total PnL", "value": f"{brain['total_pnl']:+.2f}$", "inline": True}
+                    ]
+                }]
+            }
+            send_discord(msg)
+    
+    if not is_replay: save_brain()
+
+# --- 6. MODE REPLAY (POUR VOIR L'ACTION LE WEEKEND) ---
+def run_weekend_replay():
+    """
+    Simule des trades basés sur les données de Vendredi pour montrer l'activité.
+    """
+    log_thought("🎬", "Marché Fermé. Lancement du mode REPLAY (Simulation des trades de Vendredi).")
+    
+    # On charge les données de vendredi
+    cache = {}
+    for s in WATCHLIST:
+        try:
+            df = yf.Ticker(s).history(period="5d", interval="1m") # 5 derniers jours
+            cache[s] = df
+        except: pass
+        
+    while True:
+        # On prend une action au hasard et un moment au hasard
+        s = random.choice(list(cache.keys()))
+        df = cache[s]
+        
+        # Simulation d'une décision
+        row = df.sample(1).iloc[-1]
+        rsi = random.randint(20, 80) # Simulation RSI pour l'exemple visuel
+        
+        # Simulation Achat
+        if s not in brain['holdings'] and rsi < 30:
+            execute_trade(s, row['Close'], "BUY", f"RSI survendu ({rsi})", is_replay=True)
+            
+        # Simulation Vente
+        elif s in brain['holdings']:
+            execute_trade(s, row['Close'], "SELL", "Target Replay atteinte", is_replay=True)
+            
+        time.sleep(random.randint(10, 30)) # Un trade toutes les 10-30 secondes
+
+# --- 7. THREADS ---
+def run_market_engine():
     global brain, bot_status
     load_brain()
     
     while True:
-        try:
-            nyc = pytz.timezone('America/New_York')
-            now = datetime.now(nyc)
-            market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
-            
-            if not market_open:
-                bot_status = "🌙 Recrutement..."
-                manage_strategies_lifecycle()
-                time.sleep(10)
-                continue
-            
-            bot_status = "🟢 Trading..."
-            
-            # ACHATS
-            for s in WATCHLIST_LIVE:
-                if s in brain['holdings']: continue
-                row = get_live_data(s)
+        nyc = pytz.timezone('America/New_York')
+        now = datetime.now(nyc)
+        market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
+        
+        if not market_open:
+            bot_status = "🎬 Mode Replay"
+            run_weekend_replay() # On lance le replay infini tant que c'est fermé
+            # Note: run_weekend_replay est une boucle infinie, donc on ne sort pas d'ici avant redémarrage
+            # C'est voulu pour le weekend.
+        else:
+            bot_status = "⚡ Trading Live"
+            # LOGIQUE LIVE (Lundi)
+            for s in WATCHLIST:
+                row = get_scalp_data(s)
                 if row is None: continue
                 
-                for name, strat in brain['active_strategies'].items():
-                    loc = {'row': row, 'signal': 0}
-                    try:
-                        exec(strat['code'], {}, loc)
-                        if loc['signal'] == 100:
-                            price = row['Close']
-                            qty = 200 / price
-                            sl = price * 0.98
-                            
-                            brain['holdings'][s] = {"qty": qty, "entry": price, "stop": sl, "strategy_origin": name}
-                            brain['cash'] -= 200
-                            
-                            if DISCORD_WEBHOOK_URL:
-                                requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🟢 **ACHAT {s}** ({name})\nPrix: {price:.2f}$"})
-                            save_brain()
-                            break
-                    except: pass
+                # Stratégie Scalping Pure (RSI Rapide)
+                if s not in brain['holdings']:
+                    if row['RSI'] < 25: # Très survendu en 1 minute
+                        execute_trade(s, row['Close'], "BUY", f"Scalp RSI {row['RSI']:.1f}")
+                else:
+                    # Gestion Sortie
+                    pos = brain['holdings'][s]
+                    if row['Close'] < pos['stop']:
+                        execute_trade(s, row['Close'], "SELL", "Stop Loss")
+                    elif row['Close'] > pos['tp']:
+                        execute_trade(s, row['Close'], "SELL", "Take Profit")
             
-            # VENTES (AVEC CALCUL DE PROFIT EXACT)
-            for s in list(brain['holdings'].keys()):
-                pos = brain['holdings'][s]
-                row = get_live_data(s)
-                if row is None: continue
-                curr = row['Close']
-                
-                exit = None
-                if curr < pos['stop']: exit = "STOP LOSS"
-                elif curr > pos['entry'] * 1.04: exit = "TAKE PROFIT"
-                
-                if exit:
-                    revenue = pos['qty'] * curr
-                    cost = pos['qty'] * pos['entry']
-                    pnl = revenue - cost
-                    
-                    brain['cash'] += revenue
-                    brain['total_realized_pnl'] += pnl # On ajoute au compteur global
-                    
-                    # Mise à jour score stratégie
-                    s_name = pos['strategy_origin']
-                    if s_name in brain['active_strategies']:
-                        brain['active_strategies'][s_name]['real_pnl'] += pnl
-                    
-                    del brain['holdings'][s]
-                    
-                    # Message Spécial Argent
-                    emoji = "💰" if pnl > 0 else "💸"
-                    msg = f"{emoji} **VENTE {s} ({exit})**\nRésultat: **{pnl:+.2f} $**\nStratégie: {s_name}"
-                    
-                    if DISCORD_WEBHOOK_URL:
-                        requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
-                    save_brain()
-            
-            time.sleep(60)
-        except: time.sleep(10)
+            time.sleep(10) # Scan toutes les 10 secondes (très rapide)
+
+def run_reporting():
+    """Envoie le bilan toutes les 10 minutes pile"""
+    while True:
+        time.sleep(600) # 600 secondes = 10 minutes
+        
+        val = brain['cash']
+        # Valeur estimée (sommaire)
+        assets_val = 0
+        txt = "Aucune position."
+        if brain['holdings']:
+            txt = ""
+            for s, pos in brain['holdings'].items():
+                assets_val += pos['qty'] * pos['entry']
+                txt += f"• {s}\n"
+        
+        total = val + assets_val
+        pnl = brain['total_pnl']
+        color = 0x2ecc71 if pnl >= 0 else 0xe74c3c
+        
+        msg = {
+            "embeds": [{
+                "title": "⏱️ BILAN 10 MINUTES",
+                "color": color,
+                "fields": [
+                    {"name": "Profit Réalisé", "value": f"**{pnl:+.2f} $**", "inline": True},
+                    {"name": "Capital Total", "value": f"{total:.2f} $", "inline": True},
+                    {"name": "Positions Actives", "value": txt, "inline": False}
+                ],
+                "footer": {"text": "Mode Scalping V45"}
+            }]
+        }
+        send_discord(msg)
+
+def run_heartbeat():
+    while True:
+        if HEARTBEAT_WEBHOOK_URL: requests.post(HEARTBEAT_WEBHOOK_URL, json={"content": "💓"})
+        time.sleep(30)
 
 @app.route('/')
-def index(): return f"<h1>CFO V43</h1><p>Profit Total: {brain.get('total_realized_pnl', 0):.2f}$</p>"
+def index(): return f"<h1>SCALPER V45</h1><p>{bot_status}</p>"
 
 def start_threads():
-    t1 = threading.Thread(target=run_trading_engine, daemon=True)
-    t1.start()
-    t2 = threading.Thread(target=run_heartbeat, daemon=True)
-    t2.start()
+    threading.Thread(target=run_market_engine, daemon=True).start()
+    threading.Thread(target=run_reporting, daemon=True).start()
+    threading.Thread(target=run_heartbeat, daemon=True).start()
 
 start_threads()
 

@@ -3,11 +3,11 @@
     "holdings": {},
     "params": {
         "rsi_buy": 51,
-        "stop_loss_atr": 2.532269376662071,
-        "tp_atr": 4.7899001295071955
+        "stop_loss_atr": 2.262690545372491,
+        "tp_atr": 4.274022192139153
     },
     "last_prices": {},
-    "generation": 108,
+    "generation": 109,
     "best_pnl_found": 5776.329378389055,
     "stats": {
         "wins": 0,

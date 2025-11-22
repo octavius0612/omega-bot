@@ -6,8 +6,8 @@
         "losses": 0
     },
     "params": {
-        "rsi_buy": 44,
-        "stop_loss_atr": 3.623098481179462,
+        "rsi_buy": 41,
+        "stop_loss_atr": 3.270054334984885,
         "monte_carlo_threshold": 60
     },
     "strategies": {

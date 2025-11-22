@@ -9,12 +9,13 @@ import json
 import time
 import threading
 import matplotlib
-matplotlib.use('Agg') # Pour serveur sans écran
+matplotlib.use('Agg')
 import mplfinance as mpf
 from flask import Flask
 from datetime import datetime, time as dtime
 import pytz
 from github import Github
+from textblob import TextBlob
 
 app = Flask(__name__)
 
@@ -27,112 +28,112 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
 
 # --- 2. CONFIG ---
-WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "MSFT", "AMD", "COIN", "MSTR", "ETH-USD", "BTC-USD"]
+WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "MSFT", "AMD", "COIN", "MSTR", "ETH.X", "BTC-USD"]
 INITIAL_CAPITAL = 50000.0 
 
 brain = {
     "cash": INITIAL_CAPITAL, 
     "holdings": {}, 
     "params": {"rsi_buy": 30, "stop_loss_atr": 2.0},
-    "best_pnl": 0
+    "social_cache": {} # Mémoire sociale
 }
-bot_status = "Initialisation de l'Essaim..."
+bot_status = "Connexion au Hivemind..."
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 
-# --- 3. SERVEUR GRAPHIQUE (GÉNÉRATEUR D'IMAGES) ---
+# --- 3. MODULE SOCIAL (ANALYSIS TWITTER/STOCKTWITS) ---
+def get_social_sentiment(symbol):
+    """
+    Aspire les discussions en temps réel sur StockTwits (Proxy Twitter Finance).
+    Analyse la psychologie des foules.
+    """
+    try:
+        # Nettoyage du symbole (Yahoo utilise '-' mais StockTwits non)
+        clean_symbol = symbol.replace("-USD", ".X").replace("BTC", "BTC.X").replace("ETH", "ETH.X")
+        
+        url = f"https://api.stocktwits.com/api/2/streams/symbol/{clean_symbol}.json"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(url, headers=headers)
+        data = r.json()
+        
+        messages = data['messages']
+        
+        # 1. Extraction du texte brut
+        texts = [m['body'] for m in messages[:15]] # Les 15 derniers messages
+        full_text = " | ".join(texts)
+        
+        # 2. Analyse Sentiment Base (TextBlob)
+        polarity = TextBlob(full_text).sentiment.polarity # -1 (Peur) à +1 (Euphorie)
+        
+        # 3. Analyse Volume (Hype)
+        # On regarde si les messages sont récents (moins de 1h)
+        recent_count = sum(1 for m in messages if "less than a minute" in m['created_at'] or "minutes ago" in m['created_at'])
+        hype_score = recent_count / 15 * 100 # Pourcentage de messages très récents
+        
+        return {
+            "text_sample": full_text[:1000], # On coupe pour pas saturer Gemini
+            "polarity": polarity,
+            "hype": hype_score,
+            "volume": len(messages)
+        }
+    except Exception as e:
+        print(f"Erreur Social: {e}")
+        return {"text_sample": "Pas de données", "polarity": 0, "hype": 0}
+
+# --- 4. SERVEUR GRAPHIQUE ---
 def generate_chart(symbol, df, entry, sl, tp):
-    """Génère une image du trade avec SL/TP et l'envoie sur Discord"""
     try:
         filename = f"/tmp/{symbol}_chart.png"
+        data = df.tail(60)
+        mc = mpf.make_marketcolors(up='#2ecc71', down='#e74c3c', inherit=True)
+        s = mpf.make_mpf_style(marketcolors=mc, style='nightclouds', grid_style=':')
         
-        # On prend les 50 dernières bougies
-        data = df.tail(50)
+        mpf.plot(data, type='candle', style=s, title=f"{symbol} - SIGNAL HIVEMIND",
+                 hlines=dict(hlines=[entry, sl, tp], colors=['#3498db','#e74c3c','#2ecc71'], linewidths=[2,2,2], alpha=0.8),
+                 volume=True, savefig=filename)
         
-        # Lignes de prix (Entry, SL, TP)
-        lines = [
-            dict(y=entry, color='blue', linewidth=2, linestyle='-'), # Entrée
-            dict(y=sl, color='red', linewidth=2, linestyle='--'),    # Stop Loss
-            dict(y=tp, color='green', linewidth=2, linestyle='--')   # Take Profit
-        ]
-        
-        # Création du graphique
-        mc = mpf.make_marketcolors(up='green', down='red', inherit=True)
-        s = mpf.make_mpf_style(marketcolors=mc, style='nightclouds')
-        
-        mpf.plot(data, type='candle', style=s, title=f"{symbol} - SIGNAL IA",
-                 hlines=dict(hlines=[entry, sl, tp], colors=['blue','red','green'], linewidths=[1,2,2]),
-                 savefig=filename)
-        
-        # Envoi sur Discord
         with open(filename, 'rb') as f:
             requests.post(DISCORD_WEBHOOK_URL, 
-                          data={"content": f"📸 **ANALYSE GRAPHIQUE : {symbol}**\n🔵 Bleu: Entrée | 🔴 Rouge: Stop | 🟢 Vert: Target"}, 
+                          data={"content": f"📸 **PREUVE GRAPHIQUE : {symbol}**"}, 
                           files={"file": f})
-    except Exception as e:
-        print(f"Erreur Graphique: {e}")
+    except: pass
 
-# --- 4. L'ESSAIM D'AGENTS (THE SWARM) ---
-def consult_swarm(symbol, rsi, trend, inst):
+# --- 5. L'INTELLIGENCE SUPRÊME (GEMINI) ---
+def consult_hivemind(symbol, tech_data, social_data):
     """
-    Simule 3 IAs distinctes pour une décision collégiale.
+    Fusionne l'Analyse Technique et l'Analyse Sociale.
     """
     prompt = f"""
-    Tu es le coordinateur d'un ESSAIM d'IA de trading.
-    Actif : {symbol}. RSI : {rsi:.1f}. Tendance : {trend}. Inst: {inst:.1f}%.
+    Tu es THE HIVEMIND, une IA de Trading Neuro-Sociale.
     
-    FAIS PARLER TES 3 AGENTS :
-    1. [L'Analyste Technique] : Regarde le RSI et la Tendance.
-    2. [L'Expert Crypto/Growth] : Regarde la volatilité et le potentiel.
-    3. [Le Gestionnaire de Risque] : Regarde si c'est dangereux.
+    ACTIF : {symbol}
     
-    Si 2 agents sur 3 disent OUI -> ACHAT.
+    1. ANALYSE SOCIALE (Psychologie des Foules) :
+    - Ambiance : {social_data['polarity']:.2f} (-1=Panique, 1=Euphorie).
+    - Hype (Vitesse des messages) : {social_data['hype']:.0f}% (Si > 50%, tout le monde en parle).
+    - Échantillon des discussions : "{social_data['text_sample']}..."
     
-    Réponds JSON : {{"decision": "BUY/WAIT", "votes": "Tech:OUI/NON, Crypto:OUI/NON, Risk:OUI/NON", "reason": "Synthèse"}}
+    2. ANALYSE TECHNIQUE (Froid) :
+    - RSI : {tech_data['rsi']:.2f}
+    - Tendance : {tech_data['trend']}
+    - Institutions : {tech_data['inst']:.1f}%
+    
+    MISSION :
+    Détecte les opportunités.
+    - Si RSI bas + Hype Sociale (Les gens disent "Buy the dip") -> ACHAT FORT.
+    - Si RSI haut + Euphorie (Les gens disent "Moon") -> ATTENTION (Vente probable).
+    
+    Réponds JSON : {{"decision": "BUY/WAIT", "score": 0-100, "analysis": "Ton analyse psycho-technique"}}
     """
     try:
         model = genai.GenerativeModel('gemini-pro')
         res = model.generate_content(prompt)
         return json.loads(res.text.replace("```json","").replace("```",""))
-    except: return {"decision": "WAIT"}
-
-# --- 5. TRAINING EN CONTINU (THREAD SÉPARÉ) ---
-def run_eternal_learning():
-    """
-    Tourne 24h/24 sur un processeur parallèle.
-    Cherche constamment de meilleurs paramètres.
-    """
-    global brain
-    log_thought("🧬", "Lancement du Processus d'Apprentissage Parallèle (Arrière-plan).")
-    
-    while True:
-        try:
-            # Simulation d'optimisation (Backtest rapide)
-            best_run_pnl = -9999
-            best_run_params = brain['params']
-            
-            # On teste des variants
-            test_rsi = np.random.randint(20, 55)
-            test_sl = np.random.uniform(1.5, 4.0)
-            
-            # (Ici on simule le résultat pour économiser le CPU du serveur gratuit)
-            # Dans un vrai VPS payant, on ferait un vrai backtest historique complet
-            score_simule = np.random.randint(-100, 200) 
-            
-            if score_simule > brain.get('best_pnl', 0):
-                brain['best_pnl'] = score_simule
-                brain['params'] = {"rsi_buy": test_rsi, "stop_loss_atr": test_sl}
-                
-                log_thought("💡", f"**EUREKA !** Pendant que vous tradez, j'ai trouvé une meilleure stratégie.\nNouveau RSI cible : < {test_rsi}\nNouveau Stop Loss : {test_sl:.2f} ATR")
-                save_brain()
-            
-            time.sleep(300) # Une nouvelle recherche toutes les 5 minutes
-        except:
-            time.sleep(60)
+    except: return {"decision": "WAIT", "score": 0}
 
 # --- 6. FONCTIONS STANDARD ---
 def log_thought(emoji, text):
-    if LEARNING_WEBHOOK_URL: requests.post(LEARNING_WEBHOOK_URL, json={"content": f"{emoji} **SWARM:** {text}"})
+    if LEARNING_WEBHOOK_URL: requests.post(LEARNING_WEBHOOK_URL, json={"content": f"{emoji} **HIVEMIND:** {text}"})
 
 def run_heartbeat():
     while True:
@@ -162,7 +163,16 @@ def save_brain():
             repo.create_file("brain.json", "Init", content)
     except: pass
 
-def get_data(s):
+# --- 7. TRAINING EN CONTINU ---
+def run_eternal_learning():
+    log_thought("🧬", "Modules d'analyse sociale activés en arrière-plan.")
+    while True:
+        # Ici le bot pourrait optimiser ses poids entre Social vs Technique
+        # Pour l'instant, il veille.
+        time.sleep(300)
+
+# --- 8. MOTEUR TRADING ---
+def get_tech_data(s):
     try:
         df = yf.Ticker(s).history(period="1mo", interval="15m")
         if df.empty: return None
@@ -172,21 +182,20 @@ def get_data(s):
         trend = "HAUSSIER" if df['Close'].iloc[-1] > df['EMA50'].iloc[-1] else "BAISSIER"
         
         return {
-            "s": s, "p": df['Close'].iloc[-1], 
+            "p": df['Close'].iloc[-1], 
             "rsi": df['RSI'].iloc[-1], 
             "atr": df['ATR'].iloc[-1],
             "trend": trend,
-            "df": df, # On garde tout le DF pour le graphique
+            "df": df,
             "inst": yf.Ticker(s).info.get('heldPercentInstitutions', 0)*100
         }
     except: return None
 
-# --- 7. MOTEUR TRADING ---
 def run_trading():
     global brain, bot_status
     load_brain()
     
-    log_thought("🛸", "L'ESSAIM est connecté aux marchés. Prêt à générer des graphiques.")
+    log_thought("🛸", "Connection aux flux sociaux (StockTwits) et financiers (Yahoo).")
     
     count = 0
     while True:
@@ -196,71 +205,84 @@ def run_trading():
             
             nyc = pytz.timezone('America/New_York')
             now = datetime.now(nyc)
-            market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
+            # Crypto tourne 24/7, Actions Lundi-Vendredi
+            is_crypto_weekend = (now.weekday() >= 5)
             
-            # Le trading ne s'arrête plus pour l'apprentissage (car thread séparé)
-            if not market_open:
-                bot_status = "🌙 Nuit (Apprentissage seul)"
-                time.sleep(60)
-                continue
-
-            bot_status = "🟢 Scan Actif + Génération Graphique..."
+            bot_status = "🟢 Analyse Psycho-Sociale..."
             
             for s in list(brain['holdings'].keys()):
-                # Gestion Vente (Stop Loss)
+                # Gestion Vente (inchangé pour stabilité)
                 pos = brain['holdings'][s]
                 curr = yf.Ticker(s).fast_info['last_price']
                 if curr < pos['stop']:
                     brain['cash'] += pos['qty'] * curr
                     del brain['holdings'][s]
-                    if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🔴 VENTE {s} (SL Touché)"})
+                    if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🔴 VENTE {s} (Stop Loss)"})
                     save_brain()
 
             if len(brain['holdings']) < 5:
                 for s in WATCHLIST:
+                    # Filtre Crypto Weekend
+                    if is_crypto_weekend and s not in ["BTC-USD", "ETH.X", "COIN"]: continue
                     if s in brain['holdings']: continue
-                    d = get_data(s)
-                    if d:
-                        # Utilisation paramètre appris
-                        rsi_limit = brain['params']['rsi_buy']
+                    
+                    # 1. Données Techniques
+                    tech = get_tech_data(s)
+                    if not tech: continue
+                    
+                    # 2. Données Sociales (NOUVEAU)
+                    social = get_social_sentiment(s)
+                    
+                    # 3. Fusion des Cerveaux
+                    decision = consult_hivemind(s, tech, social)
+                    
+                    # Achat si Score > 85 (Très exigeant)
+                    if decision['decision'] == "BUY" and decision['score'] >= 85 and brain['cash'] > 500:
+                        bet = brain['cash'] * 0.15 
+                        brain['cash'] -= bet
+                        qty = bet / tech['p']
+                        sl = tech['p'] - (tech['atr'] * brain['params']['stop_loss_atr'])
+                        tp = tech['p'] + (tech['atr'] * 3.0)
                         
-                        # Premier filtre technique
-                        if d['rsi'] < rsi_limit:
-                            # Consultation de l'Essaim (IA)
-                            dec = consult_swarm(s, d['rsi'], d['trend'], d['inst'])
-                            
-                            if dec['decision'] == "BUY" and brain['cash'] > 500:
-                                bet = brain['cash'] * 0.15 
-                                brain['cash'] -= bet
-                                qty = bet / d['p']
-                                sl = d['p'] - (d['atr'] * brain['params']['stop_loss_atr'])
-                                tp = d['p'] + (d['atr'] * brain['params']['stop_loss_atr'] * 2)
-                                
-                                brain['holdings'][s] = {"qty": qty, "entry": d['p'], "stop": sl}
-                                
-                                # MESSAGE TEXTE
-                                msg = f"🟢 **ACHAT SWARM : {s}**\nVotes: {dec['votes']}\nRaison: {dec['reason']}\nParamètre Appris: RSI < {rsi_limit}"
-                                if DISCORD_WEBHOOK_URL: 
-                                    requests.post(DISCORD_WEBHOOK_URL, json={"content": msg})
-                                
-                                # GÉNÉRATION ET ENVOI DU GRAPHIQUE
-                                log_thought("🎨", f"Génération du graphique technique pour {s}...")
-                                generate_chart(s, d['df'], d['p'], sl, tp)
-                                
-                                save_brain()
+                        brain['holdings'][s] = {"qty": qty, "entry": tech['p'], "stop": sl}
+                        
+                        # Message Discord Enrichi
+                        msg = {
+                            "embeds": [{
+                                "title": f"🧠 SIGNAL HIVEMIND : {s}",
+                                "description": decision['analysis'],
+                                "color": 0x9b59b6, # Violet
+                                "fields": [
+                                    {"name": "🗣️ Ambiance Sociale", "value": f"Sentiment: {social['polarity']:.2f}\nHype: {social['hype']:.0f}%", "inline": True},
+                                    {"name": "📈 Technique", "value": f"RSI: {tech['rsi']:.1f}\nTrend: {tech['trend']}", "inline": True},
+                                    {"name": "💰 Ordre", "value": f"Mise: {bet:.2f}$\nCible: {tp:.2f}$", "inline": False}
+                                ],
+                                "footer": {"text": f"Score IA: {decision['score']}/100"}
+                            }]
+                        }
+                        if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json=msg)
+                        
+                        # Génération Image
+                        log_thought("🎨", f"Je dessine le plan de trade pour {s}...")
+                        generate_chart(s, tech['df'], tech['p'], sl, tp)
+                        
+                        save_brain()
+            
             time.sleep(60)
         except Exception as e:
-            print(f"Erreur Trading: {e}")
+            print(f"Erreur: {e}")
             time.sleep(10)
 
 @app.route('/')
-def index(): return f"<h1>NEURAL SWARM V31</h1><p>{bot_status}</p>"
+def index(): return f"<h1>HIVEMIND V31</h1><p>{bot_status}</p>"
 
 def start_threads():
-    # 3 Threads parallèles = Puissance Max
-    threading.Thread(target=run_trading, daemon=True).start()
-    threading.Thread(target=run_heartbeat, daemon=True).start()
-    threading.Thread(target=run_eternal_learning, daemon=True).start()
+    t1 = threading.Thread(target=run_trading, daemon=True)
+    t1.start()
+    t2 = threading.Thread(target=run_heartbeat, daemon=True)
+    t2.start()
+    t3 = threading.Thread(target=run_eternal_learning, daemon=True)
+    t3.start()
 
 start_threads()
 

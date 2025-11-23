@@ -2,13 +2,13 @@
     "cash": 50000.0,
     "holdings": {},
     "genome": {
-        "rsi_buy": 40,
-        "sl_mult": 1.0,
-        "tp_mult": 3.8684210859807795
+        "rsi_buy": 39,
+        "sl_mult": 1.018176731451796,
+        "tp_mult": 3.5101805793124967
     },
     "stats": {
-        "generation": 107,
-        "best_pnl": 68.78353223657254
+        "generation": 146,
+        "best_pnl": 77.24698156331323
     },
     "emotions": {
         "confidence": 50.0,

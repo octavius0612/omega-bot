@@ -3,7 +3,7 @@ import yfinance as yf
 import pandas_ta as ta
 import pandas as pd
 import numpy as np
-from scipy.stats import norm, linregress
+from scipy.stats import norm
 from textblob import TextBlob
 import requests
 import google.generativeai as genai
@@ -14,7 +14,7 @@ import queue
 import io
 import random
 import matplotlib
-matplotlib.use('Agg') # Mode sans écran (Serveur)
+matplotlib.use('Agg') # Mode serveur (sans écran)
 import mplfinance as mpf
 from PIL import Image
 from flask import Flask, render_template_string
@@ -25,64 +25,61 @@ from github import Github
 app = Flask(__name__)
 
 # ==============================================================================
-# 1. CONFIGURATION & ACCÈS (LE SYSTÈME NERVEUX)
+# 1. CLÉS & CONFIGURATION
 # ==============================================================================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")      # Canal Principal (50k)
-PAPER_WEBHOOK_URL = os.environ.get("PAPER_WEBHOOK_URL")          # Canal Replay (1k)
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")      # Canal Trading
 HEARTBEAT_WEBHOOK_URL = os.environ.get("HEARTBEAT_WEBHOOK_URL")  # Canal Status
-LEARNING_WEBHOOK_URL = os.environ.get("LEARNING_WEBHOOK_URL")    # Canal Cerveau (Logs)
+LEARNING_WEBHOOK_URL = os.environ.get("LEARNING_WEBHOOK_URL")    # Canal Cerveau (Flux)
 SUMMARY_WEBHOOK_URL = os.environ.get("SUMMARY_WEBHOOK_URL")      # Canal Synthèse
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
+FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
 
 WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR", "GOOG", "META"]
-INITIAL_CAPITAL_MAIN = 50000.0 
-INITIAL_CAPITAL_PAPER = 1000.0
-SIMULATION_COUNT = 5000 # Nombre de futurs simulés par analyse
+INITIAL_CAPITAL = 50000.0 
+SIMULATION_COUNT = 5000 # Nombre de futurs simulés par analyse (Monte Carlo)
 
-# --- STRUCTURE CÉRÉBRALE (MÉMOIRE) ---
+# --- STRUCTURE DU CERVEAU (MÉMOIRE) ---
 brain = {
-    "cash": INITIAL_CAPITAL_MAIN, 
+    "cash": INITIAL_CAPITAL, 
     "holdings": {}, 
-    "paper_cash": INITIAL_CAPITAL_PAPER,
-    "paper_holdings": {},
-    
-    # ADN ÉVOLUTIF (Paramètres optimisés par le moteur génétique)
+    # ADN Évolutif (Le bot modifiera ces valeurs la nuit)
     "genome": {"rsi_buy": 30, "sl_mult": 2.0, "tp_mult": 3.5},
-    
-    # MÉMOIRE EXPÉRIENTIELLE
-    "q_table": {},           # Apprentissage par renforcement
-    "black_box": [],         # Patterns interdits (Traumatismes)
-    "karma": {s: 10.0 for s in WATCHLIST}, # Préférences par actif
-    
-    # ÉTAT PSYCHOLOGIQUE
-    "emotions": {"confidence": 50.0, "stress": 20.0, "euphoria": 0.0},
-    
+    # Stats d'apprentissage
     "stats": {"generation": 0, "best_pnl": 0.0},
+    # État Psychologique
+    "emotions": {"confidence": 50.0, "stress": 20.0, "euphoria": 0.0},
+    # Mémoire Expérientielle
+    "karma": {s: 10.0 for s in WATCHLIST},
+    "black_box": [], # Configurations interdites
     "total_pnl": 0.0
 }
 
 bot_state = {
     "status": "Démarrage V94...",
-    "mode": "INIT",
-    "last_log": "Chargement..."
+    "last_decision": "Aucune",
+    "last_log": "Initialisation...",
+    "web_logs": []
 }
 
 log_queue = queue.Queue()
+short_term_memory = []
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 # ==============================================================================
-# 2. MODULES DE COMMUNICATION (LA VOIX)
+# 2. SYSTÈME NERVEUX (LOGGING & COMMS)
 # ==============================================================================
 def fast_log(text):
-    """Ajoute un message dans la file d'attente pour Discord"""
+    """Ajoute un log dans la file d'attente et sur le site web"""
     log_queue.put(text)
+    bot_state['web_logs'].insert(0, f"[{datetime.now().strftime('%H:%M:%S')}] {text}")
+    if len(bot_state['web_logs']) > 50: bot_state['web_logs'] = bot_state['web_logs'][:50]
 
 def logger_worker():
-    """Thread dédié qui envoie les logs par paquets pour éviter le ban Discord"""
+    """Thread qui envoie les logs par paquets sur Discord (Anti-Ban)"""
     buffer = []
     last_send = time.time()
     while True:
@@ -90,7 +87,6 @@ def logger_worker():
             while not log_queue.empty():
                 buffer.append(log_queue.get())
             
-            # Envoi toutes les 1.5s
             if buffer and (len(buffer) > 5 or time.time() - last_send > 1.5):
                 msg_block = "\n".join(buffer[:12])
                 buffer = buffer[12:]
@@ -101,20 +97,19 @@ def logger_worker():
             time.sleep(0.2)
         except: time.sleep(1)
 
-def send_alert(url, embed):
-    """Envoie une alerte riche (Embed) sur un webhook spécifique"""
-    if url: 
-        try: requests.post(url, json={"embeds": [embed]})
-        except: pass
+def send_summary(msg):
+    if SUMMARY_WEBHOOK_URL: requests.post(SUMMARY_WEBHOOK_URL, json=msg)
+
+def send_trade_alert(msg):
+    if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json=msg)
 
 def run_heartbeat():
-    """Battement de cœur pour confirmer que le bot est vivant"""
     while True:
         if HEARTBEAT_WEBHOOK_URL: requests.post(HEARTBEAT_WEBHOOK_URL, json={"content": "💓"})
         time.sleep(30)
 
 # ==============================================================================
-# 3. GESTION MÉMOIRE (PERSISTANCE GITHUB)
+# 3. PERSISTANCE (MÉMOIRE GITHUB)
 # ==============================================================================
 def load_brain():
     global brain
@@ -123,9 +118,8 @@ def load_brain():
         repo = g.get_repo(REPO_NAME)
         c = repo.get_contents("brain.json")
         loaded = json.loads(c.decoded_content.decode())
-        # Fusion prudente pour ne pas écraser les nouvelles clés du code
+        # Fusion intelligente pour ne pas écraser les nouvelles clés
         if "cash" in loaded: brain.update(loaded)
-        if "paper_cash" not in brain: brain["paper_cash"] = 1000.0
     except: pass
 
 def save_brain():
@@ -135,79 +129,64 @@ def save_brain():
         content = json.dumps(brain, indent=4)
         try:
             f = repo.get_contents("brain.json")
-            repo.update_file("brain.json", "Omniscient Save", content, f.sha)
+            repo.update_file("brain.json", "Omni Save", content, f.sha)
         except:
             repo.create_file("brain.json", "Init", content)
     except: pass
 
 # ==============================================================================
-# 4. LES 5 SENS (ANALYSE DE DONNÉES AVANCÉE)
+# 4. LES SENS (MODULES D'ANALYSE)
 # ==============================================================================
 
-# --- SENS 1 : MATHÉMATIQUES (Quantique) ---
+# A. QUANTIQUE (Monte Carlo)
 def run_monte_carlo(prices):
-    """Simule 5000 avenirs possibles selon la volatilité passée"""
     try:
         returns = prices.pct_change().dropna()
-        # Génération de matrices aléatoires (NumPy)
+        # Simulation vectorisée (NumPy) de 5000 avenirs possibles
         sims = prices.iloc[-1] * (1 + np.random.normal(returns.mean(), returns.std(), (SIMULATION_COUNT, 10)))
-        # Calcul de la probabilité que le prix finisse plus haut
         prob = np.sum(sims[:, -1] > prices.iloc[-1]) / SIMULATION_COUNT
         return prob
     except: return 0.5
 
-# --- SENS 2 : VISION (Analyse d'Image IA) ---
+# B. VISION (Analyse Graphique IA)
 def get_vision_score(df):
-    """Génère un graphique et demande à Gemini de le juger"""
     try:
         buf = io.BytesIO()
-        # Style 'nightclouds' pour un look pro
+        # Génération du graphique en mémoire
         mpf.plot(df.tail(60), type='candle', style='nightclouds', savefig=buf)
         buf.seek(0)
         img = Image.open(buf)
-        
-        prompt = "Tu es un expert chartiste. Analyse ce graphique. Donne un score d'achat entre 0.0 (Vente) et 1.0 (Achat Fort). Réponds UNIQUEMENT le chiffre."
-        res = model.generate_content([prompt, img])
+        # L'IA regarde l'image
+        res = model.generate_content(["Tu es un expert chartiste. Analyse ce graphique. Donne un score d'achat de 0.0 (Vente) à 1.0 (Achat Fort). Réponds UNIQUEMENT le chiffre.", img])
         return float(res.text.strip())
     except: return 0.5
 
-# --- SENS 3 : SOCIAL (Psychologie des foules) ---
+# C. SOCIAL (Sentiment de Foule)
 def get_social_hype(symbol):
-    """Scrape StockTwits pour sentir l'humeur"""
     try:
         url = f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        r = requests.get(url, headers=headers).json()
-        txt = " ".join([m['body'] for m in r['messages'][:15]])
-        # Analyse de sentiment basique (-1 à +1)
-        return TextBlob(txt).sentiment.polarity
+        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
+        txt = " ".join([m['body'] for m in r['messages'][:10]])
+        return TextBlob(txt).sentiment.polarity # Score entre -1 et 1
     except: return 0
 
-# --- SENS 4 : BALEINES (Volume Institutionnel) ---
+# D. BALEINE (Détection Volume)
 def check_whale(df):
-    """Détecte les anomalies de volume"""
     try:
         vol = df['Volume'].iloc[-1]
         avg = df['Volume'].rolling(20).mean().iloc[-1]
-        # Si volume > 2.5x la moyenne, c'est une baleine
-        return (vol > avg * 2.5), f"x{vol/avg:.1f}"
+        return (vol > avg * 2.5), f"x{vol/avg:.1f}" # Ratio de volume
     except: return False, "x1.0"
 
-# --- SENS 5 : TECHNIQUE (Indicateurs Classiques) ---
+# E. TECHNIQUE (Heikin Ashi + Fibo)
 def get_tech_indicators(df):
-    df['RSI'] = ta.rsi(df['Close'], length=14)
-    df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-    df['SMA200'] = ta.sma(df['Close'], length=200) # Tendance de fond
-    
-    # Heikin Ashi (Lissage)
     ha_close = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
     ha_open = (df['Open'].shift(1) + df['Close'].shift(1)) / 2
     trend = "HAUSSIER" if ha_close.iloc[-1] > ha_open.iloc[-1] else "BAISSIER"
-    
-    return trend, df
+    return trend
 
 # ==============================================================================
-# 5. LE CERVEAU CENTRAL (PRISE DE DÉCISION)
+# 5. LE CERVEAU CENTRAL (CONSEIL + PSYCHO)
 # ==============================================================================
 def consult_council(s, rsi, mc, vis, soc, whale, trend):
     """
@@ -215,7 +194,7 @@ def consult_council(s, rsi, mc, vis, soc, whale, trend):
     """
     mood = brain['emotions']
     prompt = f"""
-    DÉCISION CRITIQUE POUR {s}.
+    CONSEIL SUPRÊME POUR {s}.
     État Psychologique Bot: Confiance {mood['confidence']}%, Stress {mood['stress']}%.
     
     DONNÉES ENTRÉE :
@@ -227,7 +206,7 @@ def consult_council(s, rsi, mc, vis, soc, whale, trend):
     
     ALGORITHME DE DÉCISION :
     - Si Maths > 60% ET Vision > 0.6 : ACHAT.
-    - Si Baleine présente ET RSI < 35 : ACHAT FORT (Dip).
+    - Si Baleine ET RSI < 30 : ACHAT FORT (Dip).
     - Sinon : ATTENTE.
     
     Réponds JSON: {{"vote": "BUY/WAIT", "reason": "Une phrase courte d'explication"}}
@@ -237,27 +216,54 @@ def consult_council(s, rsi, mc, vis, soc, whale, trend):
         return json.loads(res.text.replace("```json","").replace("```",""))
     except: return {"vote": "WAIT", "reason": "Erreur Conseil"}
 
+def update_emotions(pnl):
+    e = brain['emotions']
+    if pnl > 0:
+        e['confidence'] = min(e['confidence']+5, 100)
+        e['stress'] = max(e['stress']-5, 0)
+        e['euphoria'] += 5
+    else:
+        e['confidence'] = max(e['confidence']-10, 10)
+        e['stress'] = min(e['stress']+10, 100)
+        e['euphoria'] = 0
+
+def calculate_position_size(score, capital):
+    """Formule de Kelly ajustée par les émotions"""
+    e = brain['emotions']
+    # Si stressé, on mise moins. Si confiant, on mise plus.
+    mood_factor = 0.5 if e['stress'] > 70 else (1.2 if e['confidence'] > 80 else 1.0)
+    
+    win_prob = score / 100.0
+    if win_prob <= 0.5: return 0
+    kelly = win_prob - (1 - win_prob)
+    
+    # Sécurité : Demi-Kelly cappé à 20% du capital
+    bet = capital * kelly * 0.5 * mood_factor
+    return min(bet, capital * 0.20)
+
 # ==============================================================================
-# 6. MOTEUR D'APPRENTISSAGE (GENETICS & REPLAY)
+# 6. MOTEUR D'ÉVOLUTION (LE RÊVE NOCTURNE)
 # ==============================================================================
 def run_dream_learning():
     """
     Tourne quand le marché est fermé.
-    Utilise des données historiques pour optimiser les paramètres (Génétique).
+    Simule des mutations génétiques pour trouver les meilleurs paramètres.
     """
     global brain, bot_state
     cache = {}
     
-    # Pré-chargement pour vitesse
+    # Pré-chargement des données pour aller vite
     for s in WATCHLIST:
         try:
             df = yf.Ticker(s).history(period="1mo", interval="1h")
             if not df.empty:
-                _, df = get_tech_indicators(df)
+                df['RSI'] = ta.rsi(df['Close'], length=14)
+                df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
                 cache[s] = df.dropna()
         except: pass
 
     while True:
+        # Vérification horaire
         nyc = pytz.timezone('America/New_York')
         now = datetime.now(nyc)
         market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
@@ -266,11 +272,10 @@ def run_dream_learning():
             time.sleep(60)
             continue
             
-        # --- MODE RÊVE ---
         bot_state['status'] = f"🌙 RÊVE (Gen #{brain['stats']['generation']})"
         brain['stats']['generation'] += 1
         
-        # 1. Mutation Génétique (On teste de nouveaux paramètres)
+        # 1. MUTATION (Création d'un mutant)
         parent = brain['genome']
         mutant = {
             "rsi_buy": max(15, min(60, parent['rsi_buy'] + random.randint(-5, 5))),
@@ -278,16 +283,16 @@ def run_dream_learning():
             "tp_mult": max(1.5, parent['tp_mult'] + random.uniform(-0.5, 0.5))
         }
         
-        # 2. Simulation Rapide (Replay)
+        # 2. SIMULATION RAPIDE (Backtest sur cache)
         s = random.choice(list(cache.keys()))
         df = cache[s]
-        idx = random.randint(0, len(df)-50)
-        subset = df.iloc[idx : idx+50]
+        start_idx = random.randint(0, len(df) - 50)
+        subset = df.iloc[start_idx : start_idx+50]
         
         pnl = 0
+        trades = 0
         for i in range(len(subset)-10):
             row = subset.iloc[i]
-            # Test du mutant
             if row['RSI'] < mutant['rsi_buy']:
                 entry = row['Close']
                 sl = entry - (row['ATR'] * mutant['sl_mult'])
@@ -295,38 +300,48 @@ def run_dream_learning():
                 
                 future = subset.iloc[i+1 : i+6]
                 if not future.empty:
-                    if future['High'].max() > tp: pnl += (tp - entry)
-                    elif future['Low'].min() < sl: pnl -= (entry - sl)
+                    if future['High'].max() > tp: pnl += (tp - entry); trades += 1
+                    elif future['Low'].min() < sl: pnl -= (entry - sl); trades += 1
         
-        # 3. Sélection Naturelle
+        # 3. SÉLECTION NATURELLE
         if pnl > brain['stats']['best_pnl']:
             brain['stats']['best_pnl'] = pnl
             brain['genome'] = mutant
             save_brain()
             fast_log(f"🧬 **ÉVOLUTION:** Nouveau Gène RSI<{mutant['rsi_buy']} | Gain Simulé +{pnl:.2f}$")
+        else:
+            if random.random() < 0.2: # Log pas tout le temps pour éviter le spam
+                fast_log(f"🧪 **TEST MUTANT {s}:** PnL {pnl:.2f}$ (Inférieur au record).")
             
-        # 4. Mode Replay Visuel (Pour divertir sur le canal Paper)
-        if random.random() < 0.1: # 1 fois sur 10
-            row = subset.iloc[-1]
-            # On simule un signal visuel
-            msg = {
-                "title": f"🎬 REPLAY SCÉNARIO : {s}",
-                "description": f"Test paramètre RSI < {mutant['rsi_buy']}.\nRésultat Simulation: **{pnl:+.2f}$**",
-                "color": 0x3498db,
-                "footer": {"text": f"Solde Paper (Simulé): {brain['paper_cash']:.2f}$"}
-            }
-            send_alert(PAPER_WEBHOOK_URL, msg)
-
-        time.sleep(5)
+        time.sleep(5) # Vitesse d'apprentissage
 
 # ==============================================================================
-# 7. MOTEUR TRADING HYBRIDE (LIVE + PAPER)
+# 7. MOTEUR TRADING LIVE & GHOST BROKER
 # ==============================================================================
-def run_trading_engine():
+class GhostBroker:
+    def get_price(self, symbol):
+        try: return yf.Ticker(symbol).fast_info['last_price']
+        except: return None
+    def get_portfolio(self):
+        equity = brain['cash']
+        positions = []
+        for s, d in brain['holdings'].items():
+            p = self.get_price(s)
+            if p:
+                val = d['qty'] * p
+                equity += val
+                pnl = val - (d['qty'] * d['entry'])
+                pct = (pnl / (d['qty'] * d['entry'])) * 100
+                positions.append({"symbol": s, "qty": d['qty'], "entry": d['entry'], "current": p, "pnl": round(pnl, 2), "pct": round(pct, 2)})
+        return equity, positions
+
+broker = GhostBroker()
+
+def run_trading():
     global brain, bot_state
     load_brain()
     
-    fast_log("🌌 **OMNISCIENCE:** Moteurs démarrés. Prêt.")
+    fast_log("🌌 **OMNISCIENCE:** Moteurs démarrés.")
     
     while True:
         try:
@@ -335,31 +350,33 @@ def run_trading_engine():
             market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
             
             if market_open:
-                bot_state['status'] = "🟢 LIVE TRADING"
+                bot_state['status'] = "🟢 TRADING ACTIF"
                 
-                # --- GESTION VENTES (MAIN + PAPER) ---
-                # (Simplifié : On applique la même logique aux deux portefeuilles)
-                for pf_name, pf_holdings, pf_cash in [("MAIN", brain['holdings'], 'cash'), ("PAPER", brain['paper_holdings'], 'paper_cash')]:
-                    for s in list(pf_holdings.keys()):
-                        pos = pf_holdings[s]
-                        try: curr = yf.Ticker(s).fast_info['last_price']
-                        except: continue
+                # 1. GESTION VENTES
+                for s in list(brain['holdings'].keys()):
+                    pos = brain['holdings'][s]
+                    curr = broker.get_price(s)
+                    if not curr: continue
+                    
+                    exit_r = None
+                    if curr < pos['stop']: exit_r = "STOP LOSS"
+                    elif curr > pos['tp']: exit_r = "TAKE PROFIT"
+                    
+                    if exit_r:
+                        pnl = (curr - pos['entry']) * pos['qty']
+                        brain['cash'] += pos['qty'] * curr
+                        brain['total_pnl'] += pnl
+                        del brain['holdings'][s]
                         
-                        exit_r = None
-                        if curr < pos['stop']: exit_r = "STOP LOSS"
-                        elif curr > pos['tp']: exit_r = "TAKE PROFIT"
+                        update_emotions(pnl)
+                        col = 0x2ecc71 if pnl > 0 else 0xe74c3c
                         
-                        if exit_r:
-                            pnl = (curr - pos['entry']) * pos['qty']
-                            brain[pf_cash] += pos['qty'] * curr
-                            del pf_holdings[s]
-                            
-                            webhook = DISCORD_WEBHOOK_URL if pf_name == "MAIN" else PAPER_WEBHOOK_URL
-                            col = 0x2ecc71 if pnl > 0 else 0xe74c3c
-                            send_alert(webhook, {"title": f"{exit_r} : {s}", "description": f"PnL: **{pnl:.2f}$**", "color": col})
-                            save_brain()
+                        send_trade_alert({
+                            "embeds": [{"title": f"{exit_r} : {s}", "description": f"PnL: **{pnl:.2f}$**", "color": col}]
+                        })
+                        save_brain()
 
-                # --- SCAN ACHATS ---
+                # 2. SCAN ACHATS
                 if len(brain['holdings']) < 5:
                     for s in WATCHLIST:
                         if s in brain['holdings']: continue
@@ -367,10 +384,12 @@ def run_trading_engine():
                         try:
                             df = yf.Ticker(s).history(period="1mo", interval="1h")
                             if df.empty: continue
-                            trend, df = get_tech_indicators(df) # Ajoute RSI/ATR
+                            
+                            df['RSI'] = ta.rsi(df['Close'], length=14)
+                            df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
                             row = df.iloc[-1]
                             
-                            # FILTRE RAPIDE (Basé sur la génétique)
+                            # FILTRE RAPIDE (Paramètres Appris par Génétique)
                             if row['RSI'] < brain['genome']['rsi_buy']:
                                 
                                 fast_log(f"🔎 **SCAN {s}:** RSI {row['RSI']:.1f} bas. Analyse profonde...")
@@ -380,65 +399,132 @@ def run_trading_engine():
                                 vis = get_vision_score(df)
                                 soc = get_social_hype(s)
                                 whl, wh_msg = check_whale(df)
+                                trend, _ = get_tech_indicators(df)
                                 
                                 # CONSEIL
                                 council = consult_council(s, row['RSI'], mc, vis, soc, whl, trend)
+                                bot_state['last_decision'] = f"{s}: {council['vote']}"
                                 
                                 fast_log(f"🧠 **{s}:** MC:{mc:.2f} | Vis:{vis:.2f} | {wh_msg} => {council['vote']}")
                                 
                                 if council['vote'] == "BUY":
                                     price = row['Close']
                                     
-                                    # --- EXECUTION MAIN (50k) ---
-                                    qty = 1000 / price
-                                    sl = price - (row['ATR'] * brain['genome']['sl_mult'])
-                                    tp = price + (row['ATR'] * brain['genome']['tp_mult'])
+                                    # Score global pour la mise
+                                    global_score = (mc + vis) * 50 
+                                    bet = calculate_position_size(global_score, brain['cash'])
                                     
-                                    brain['holdings'][s] = {"qty": qty, "entry": price, "stop": sl, "tp": tp}
-                                    brain['cash'] -= 1000
-                                    
-                                    # Alerte Main
-                                    msg = {
-                                        "title": f"🌌 ACHAT OMNISCIENT : {s}",
-                                        "description": council['reason'],
-                                        "color": 0x2ecc71,
-                                        "fields": [
-                                            {"name": "Vision", "value": f"{vis:.2f}", "inline": True},
-                                            {"name": "Quantique", "value": f"{mc:.2f}", "inline": True},
-                                            {"name": "Social", "value": f"{soc:.2f}", "inline": True}
-                                        ]
-                                    }
-                                    send_alert(DISCORD_WEBHOOK_URL, msg)
-                                    
-                                    # --- EXECUTION PAPER (1k) ---
-                                    # Le compte paper suit le maître
-                                    qty_p = 100 / price
-                                    brain['paper_holdings'][s] = {"qty": qty_p, "entry": price, "stop": sl, "tp": tp}
-                                    brain['paper_cash'] -= 100
-                                    
-                                    send_alert(PAPER_WEBHOOK_URL, {"title": f"📋 COPY TRADE : {s}", "description": "Suivi du compte principal.", "color": 0x3498db})
-                                    
-                                    save_brain()
+                                    if bet > 200:
+                                        qty = bet / price
+                                        # SL/TP issus du génome appris
+                                        sl = price - (row['ATR'] * brain['genome']['sl_mult'])
+                                        tp = price + (row['ATR'] * brain['genome']['tp_mult'])
+                                        
+                                        brain['holdings'][s] = {"qty": qty, "entry": price, "stop": sl, "tp": tp}
+                                        brain['cash'] -= bet
+                                        
+                                        send_trade_alert({
+                                            "embeds": [{
+                                                "title": f"🌌 ACHAT OMNISCIENT : {s}",
+                                                "description": council['reason'],
+                                                "color": 0x2ecc71,
+                                                "fields": [
+                                                    {"name": "Vision", "value": f"{vis:.2f}", "inline": True},
+                                                    {"name": "Quantique", "value": f"{mc:.2f}", "inline": True},
+                                                    {"name": "Mise", "value": f"{bet:.0f}$", "inline": True}
+                                                ]
+                                            }]
+                                        })
+                                        save_brain()
                         except: pass
             else:
-                bot_state['status'] = "🌙 NUIT (Apprentissage)"
+                bot_state['status'] = "🌙 NUIT"
             
             time.sleep(30)
         except: time.sleep(10)
 
-# --- 8. DASHBOARD ---
+# ==============================================================================
+# 8. DASHBOARD WEB
+# ==============================================================================
+HTML = """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta http-equiv="refresh" content="10">
+    <title>OMNISCIENT V94</title>
+    <style>
+        :root { --bg: #050505; --card: #0f1115; --text: #00ff41; --red: #ff0033; }
+        body { background: var(--bg); color: var(--text); font-family: 'Consolas', monospace; padding: 20px; margin: 0; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
+        .card { background: var(--card); border: 1px solid #333; padding: 15px; }
+        h2 { margin: 0 0 10px 0; font-size: 16px; color: #fff; }
+        .big { font-size: 28px; font-weight: bold; color: #fff; }
+        .log-box { height: 300px; overflow-y: auto; font-size: 12px; border-top: 1px solid #333; margin-top: 10px; padding-top: 5px; opacity: 0.8; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        td { padding: 5px 0; border-bottom: 1px solid #1a1a1a; }
+        .green { color: var(--text); } .red { color: var(--red); }
+    </style>
+</head>
+<body>
+    <h1>👁️ THE OMNISCIENT V94</h1>
+    
+    <div class="grid">
+        <div class="card">
+            <h2>STATUS</h2>
+            <div class="big">{{ status }}</div>
+            <p>Dernière Action: {{ last_dec }}</p>
+        </div>
+        <div class="card">
+            <h2>FINANCE</h2>
+            <div class="big">${{ equity }}</div>
+            <p>Cash: ${{ cash }}</p>
+        </div>
+        <div class="card">
+            <h2>PSYCHOLOGIE</h2>
+            <p>Confiance: {{ conf }}%</p>
+            <p>Stress: {{ stress }}%</p>
+        </div>
+    </div>
+    <br>
+    <div class="grid" style="grid-template-columns: 2fr 1fr;">
+        <div class="card">
+            <h2>POSITIONS</h2>
+            <table>
+                <tr><th>ACTIF</th><th>QTE</th><th>ENTRÉE</th><th>ACTUEL</th><th>PNL</th></tr>
+                {% for p in positions %}
+                <tr>
+                    <td>{{ p.symbol }}</td>
+                    <td>{{ p.qty|round(2) }}</td>
+                    <td>{{ p.entry }}</td>
+                    <td>{{ p.current }}</td>
+                    <td class="{{ 'green' if p.pnl >= 0 else 'red' }}">{{ p.pnl }}$</td>
+                </tr>
+                {% endfor %}
+            </table>
+        </div>
+        <div class="card">
+            <h2>LOGS CERVEAU</h2>
+            <div class="log-box">
+                {% for log in logs %}
+                <div>{{ log }}</div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
 @app.route('/')
 def index():
-    # Calcul Equity
-    eq_main = brain['cash'] + sum([d['qty']*100 for d in brain['holdings'].values()]) # Approx
-    return f"""
-    <style>body{{background:#000;color:#0f0;font-family:monospace;padding:20px}}</style>
-    <h1>OMNI-GOD V90</h1>
-    <p>Status: {bot_state['status']}</p>
-    <p>Main Equity: ${eq_main:,.2f}</p>
-    <p>Paper Equity: ${brain.get('paper_cash', 0):,.2f}</p>
-    <p>Log: {bot_state.get('last_log', 'Running...')}</p>
-    """
+    eq, pos = broker.get_portfolio()
+    return render_template_string(HTML, 
+        equity=f"{eq:,.2f}", cash=f"{brain['cash']:,.2f}",
+        status=bot_state['status'], positions=pos,
+        last_dec=bot_state['last_decision'],
+        conf=brain['emotions']['confidence'], stress=brain['emotions']['stress'],
+        logs=bot_state['web_logs']
+    )
 
 def start_threads():
     threading.Thread(target=run_trading, daemon=True).start()

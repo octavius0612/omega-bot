@@ -13,3 +13,4 @@ textblob
 matplotlib
 mplfinance
 Pillow
+websocket-client

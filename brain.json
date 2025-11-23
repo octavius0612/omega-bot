@@ -1,6 +1,21 @@
 {
     "cash": 50000.0,
     "holdings": {},
+    "genome": {
+        "rsi_buy": 32,
+        "sl_mult": 1.7224235123169258,
+        "tp_mult": 3.403188338448635
+    },
+    "memory_bank": [],
+    "black_box": [],
+    "stats": {
+        "generation": 1,
+        "best_pnl": 38.994461344383865
+    },
+    "emotions": {
+        "confidence": 50.0,
+        "stress": 20.0
+    },
     "best_params": {
         "rsi_buy": 48,
         "stop_loss_mult": 1.1,

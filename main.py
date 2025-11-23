@@ -34,7 +34,6 @@ REPO_NAME = os.environ.get("REPO_NAME")
 WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR", "GOOG"]
 INITIAL_CAPITAL = 50000.0 
 
-# Mémoire Persistante
 brain = {
     "cash": INITIAL_CAPITAL, 
     "holdings": {}, 
@@ -44,16 +43,17 @@ brain = {
 }
 
 bot_state = {
-    "status": "Chargement des modules...",
+    "status": "Démarrage...",
     "last_decision": "Aucune",
-    "last_log": "Démarrage...",
-    "equity": INITIAL_CAPITAL
+    "last_log": "Initialisation...",
+    "equity": INITIAL_CAPITAL,
+    "positions": []
 }
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# --- 3. CLASSE "GHOST BROKER" (BANQUE INTERNE) ---
+# --- 3. CLASSE "GHOST BROKER" ---
 class GhostBroker:
     def get_price(self, symbol):
         try: return yf.Ticker(symbol).fast_info['last_price']
@@ -69,7 +69,7 @@ class GhostBroker:
                 equity += val
                 pnl = val - (d['qty'] * d['avg_price'])
                 pnl_pct = (pnl / (d['qty'] * d['avg_price'])) * 100
-                positions.append({"symbol": s, "qty": d['qty'], "entry": d['avg_price'], "current": p, "pnl": pnl, "pct": pnl_pct})
+                positions.append({"symbol": s, "qty": d['qty'], "entry": d['avg_price'], "current": p, "pnl": round(pnl, 2), "pct": round(pnl_pct, 2)})
         return equity, positions
 
     def execute(self, side, symbol, price, qty, reason):
@@ -78,7 +78,6 @@ class GhostBroker:
             if brain['cash'] >= cost:
                 brain['cash'] -= cost
                 if symbol in brain['holdings']:
-                    # Moyenne à la baisse
                     old = brain['holdings'][symbol]
                     new_qty = old['qty'] + qty
                     new_avg = ((old['qty']*old['avg_price']) + cost) / new_qty
@@ -109,21 +108,21 @@ class GhostBroker:
         bot_state['last_log'] = entry
         brain['trade_history'].append(entry)
         if DISCORD_WEBHOOK_URL:
-            requests.post(DISCORD_WEBHOOK_URL, json={"content": f"**{title}**\n{desc}"})
+            try: requests.post(DISCORD_WEBHOOK_URL, json={"content": f"**{title}**\n{desc}"})
+            except: pass
         save_brain()
 
 broker = GhostBroker()
 
-# --- 4. MODULES D'INTELLIGENCE (LES SENS) ---
-
-# A. QUANTIQUE (Monte Carlo)
+# --- 4. MODULES INTELLIGENTS ---
 def run_monte_carlo(prices):
-    returns = prices.pct_change().dropna()
-    sims = prices.iloc[-1] * (1 + np.random.normal(returns.mean(), returns.std(), (1000, 10)))
-    prob = np.sum(sims[:, -1] > prices.iloc[-1]) / 1000
-    return prob
+    try:
+        returns = prices.pct_change().dropna()
+        sims = prices.iloc[-1] * (1 + np.random.normal(returns.mean(), returns.std(), (1000, 10)))
+        prob = np.sum(sims[:, -1] > prices.iloc[-1]) / 1000
+        return prob
+    except: return 0.5
 
-# B. VISION (Graphique)
 def get_vision_score(df):
     try:
         buf = io.BytesIO()
@@ -134,22 +133,22 @@ def get_vision_score(df):
         return float(res.text.strip())
     except: return 0.5
 
-# C. SOCIAL (StockTwits)
 def get_social_hype(symbol):
     try:
         url = f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"
-        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        r = requests.get(url, headers=headers).json()
         txt = " ".join([m['body'] for m in r['messages'][:10]])
         return TextBlob(txt).sentiment.polarity
     except: return 0
 
-# D. BALEINES (Volume)
 def check_whale(df):
-    vol = df['Volume'].iloc[-1]
-    avg = df['Volume'].rolling(20).mean().iloc[-1]
-    return vol > (avg * 2.5)
+    try:
+        vol = df['Volume'].iloc[-1]
+        avg = df['Volume'].rolling(20).mean().iloc[-1]
+        return vol > (avg * 2.5)
+    except: return False
 
-# --- 5. LE CONSEIL DES SAGES (Cerveau Central) ---
 def consult_council(s, rsi, mc, vis, social, whale):
     prompt = f"""
     CONSEIL SUPRÊME POUR {s}.
@@ -170,120 +169,7 @@ def consult_council(s, rsi, mc, vis, social, whale):
         return json.loads(res.text.replace("```json","").replace("```",""))
     except: return {"vote": "WAIT", "reason": "Erreur IA"}
 
-# --- 6. MOTEUR PRINCIPAL ---
-def run_engine():
-    global bot_state, brain
-    load_brain()
-    print("MOTEUR SUPRÊME DÉMARRÉ.")
-    
-    while True:
-        try:
-            # Mise à jour Dashboard
-            eq, positions = broker.get_portfolio()
-            bot_state['equity'] = eq
-            bot_state['positions'] = positions
-            
-            # Horaires Bourse
-            nyc = pytz.timezone('America/New_York')
-            now = datetime.now(nyc)
-            if not (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0)):
-                bot_state['status'] = "🌙 Marché Fermé (Analyse de fond)"
-                time.sleep(60)
-                continue
-                
-            bot_state['status'] = "👁️ SCAN OMNISCIENT..."
-            
-            # 1. GESTION VENTES
-            for s in list(brain['holdings'].keys()):
-                pos = brain['holdings'][s]
-                curr = broker.get_price(s)
-                if not curr: continue
-                
-                # Stop Loss 3% / Take Profit 6%
-                if curr < pos['avg_price'] * 0.97:
-                    broker.execute("SELL", s, curr, 0, "Stop Loss")
-                elif curr > pos['avg_price'] * 1.06:
-                    broker.execute("SELL", s, curr, 0, "Take Profit")
-
-            # 2. SCAN ACHATS
-            if len(brain['holdings']) < 5:
-                for s in WATCHLIST:
-                    if s in brain['holdings']: continue
-                    
-                    # Téléchargement Data
-                    try:
-                        df = yf.Ticker(s).history(period="1mo", interval="1h")
-                        if df.empty: continue
-                        
-                        # Indicateurs de base
-                        rsi = ta.rsi(df['Close'], length=14).iloc[-1]
-                        
-                        # Filtre rapide pour économiser l'IA
-                        if rsi < 40: 
-                            # Lancement des Modules Avancés
-                            mc = run_monte_carlo(df['Close'])
-                            vis = get_vision_score(df)
-                            soc = get_social_hype(s)
-                            whl = check_whale(df)
-                            
-                            # Le Conseil
-                            council = consult_council(s, rsi, mc, vis, soc, whl)
-                            bot_state['last_decision'] = f"{s}: {council['vote']} ({council['reason']})"
-                            
-                            if council['vote'] == "BUY":
-                                qty = 500 / df['Close'].iloc[-1] # Mise fixe 500$
-                                broker.execute("BUY", s, df['Close'].iloc[-1], qty, council['reason'])
-                                
-                    except Exception as e: print(e)
-                    time.sleep(2)
-            
-            time.sleep(60)
-        except Exception as e:
-            print(f"Erreur Loop: {e}")
-            time.sleep(10)
-
-# --- 7. DASHBOARD WEB ---
-HTML = """
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta http-equiv="refresh" content="5">
-    <title>SUPREME ENTITY</title>
-    <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        .card { border: 1px solid #333; padding: 15px; margin-bottom: 20px; }
-        h1 { margin: 0; color: #fff; }
-        table { width: 100%; border-collapse: collapse; color: #aaa; }
-        td { border-bottom: 1px solid #222; padding: 5px; }
-    </style>
-</head>
-<body>
-    <h1>👁️ THE SUPREME ENTITY</h1>
-    <div class="card">
-        <h3>STATUS: {{ status }}</h3>
-        <h2>CAPITAL: ${{ equity }}</h2>
-        <p>Dernière Décision IA: {{ last_dec }}</p>
-        <p>Log: {{ last_log }}</p>
-    </div>
-    <div class="card">
-        <table>
-            <tr><th>ACTIF</th><th>QTE</th><th>PRIX MOY</th><th>VALEUR</th><th>PNL</th></tr>
-            {% for p in positions %}
-            <tr>
-                <td>{{ p.symbol }}</td>
-                <td>{{ p.qty|round(2) }}</td>
-                <td>{{ p.entry }}</td>
-                <td>{{ (p.qty * p.current)|round(2) }}</td>
-                <td style="color: {{ 'red' if p.pnl < 0 else '#0f0' }}">{{ p.pnl }}$</td>
-            </tr>
-            {% endfor %}
-        </table>
-    </div>
-</body>
-</html>
-"""
-
-# --- 8. PERSISTANCE & THREADS ---
+# --- 5. PERSISTANCE ---
 def load_brain():
     global brain
     try:
@@ -306,6 +192,112 @@ def save_brain():
             repo.create_file("brain.json", "Init", content)
     except: pass
 
+# --- 6. MOTEUR PRINCIPAL (C'est ici que j'ai corrigé le nom) ---
+def run_trading_engine():
+    global bot_state, brain
+    load_brain()
+    print("MOTEUR DÉMARRÉ.")
+    
+    while True:
+        try:
+            # Mise à jour Dashboard
+            eq, positions = broker.get_portfolio()
+            bot_state['equity'] = eq
+            bot_state['positions'] = positions
+            
+            # Horaires Bourse
+            nyc = pytz.timezone('America/New_York')
+            now = datetime.now(nyc)
+            if not (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0)):
+                bot_state['status'] = "🌙 Marché Fermé"
+                time.sleep(60)
+                continue
+                
+            bot_state['status'] = "👁️ SCANNING..."
+            
+            # 1. VENTES
+            for s in list(brain['holdings'].keys()):
+                pos = brain['holdings'][s]
+                curr = broker.get_price(s)
+                if not curr: continue
+                
+                if curr < pos['avg_price'] * 0.97:
+                    broker.execute("SELL", s, curr, 0, "Stop Loss")
+                elif curr > pos['avg_price'] * 1.06:
+                    broker.execute("SELL", s, curr, 0, "Take Profit")
+
+            # 2. ACHATS
+            if len(brain['holdings']) < 5:
+                for s in WATCHLIST:
+                    if s in brain['holdings']: continue
+                    
+                    try:
+                        df = yf.Ticker(s).history(period="1mo", interval="1h")
+                        if df.empty: continue
+                        
+                        rsi = ta.rsi(df['Close'], length=14).iloc[-1]
+                        
+                        if rsi < 40: 
+                            mc = run_monte_carlo(df['Close'])
+                            vis = get_vision_score(df)
+                            soc = get_social_hype(s)
+                            whl = check_whale(df)
+                            
+                            council = consult_council(s, rsi, mc, vis, soc, whl)
+                            bot_state['last_decision'] = f"{s}: {council['vote']}"
+                            
+                            if council['vote'] == "BUY":
+                                qty = 500 / df['Close'].iloc[-1]
+                                broker.execute("BUY", s, df['Close'].iloc[-1], qty, council['reason'])
+                    except Exception as e: print(e)
+                    time.sleep(2)
+            
+            time.sleep(60)
+        except Exception as e:
+            print(f"Erreur: {e}")
+            time.sleep(10)
+
+# --- 7. DASHBOARD WEB ---
+HTML = """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta http-equiv="refresh" content="10">
+    <title>SUPREME ENTITY</title>
+    <style>
+        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+        .card { border: 1px solid #333; padding: 15px; margin-bottom: 20px; }
+        h1 { margin: 0; color: #fff; }
+        table { width: 100%; border-collapse: collapse; color: #aaa; }
+        td { border-bottom: 1px solid #222; padding: 5px; }
+    </style>
+</head>
+<body>
+    <h1>👁️ THE SUPREME ENTITY V65</h1>
+    <div class="card">
+        <h3>STATUS: {{ status }}</h3>
+        <h2>CAPITAL: ${{ equity }}</h2>
+        <p>Dernière Décision: {{ last_dec }}</p>
+        <p>Log: {{ last_log }}</p>
+    </div>
+    <div class="card">
+        <table>
+            <tr><th>ACTIF</th><th>QTE</th><th>PRIX MOY</th><th>VALEUR</th><th>PNL</th></tr>
+            {% for p in positions %}
+            <tr>
+                <td>{{ p.symbol }}</td>
+                <td>{{ p.qty|round(2) }}</td>
+                <td>{{ p.entry }}</td>
+                <td>{{ (p.qty * p.current)|round(2) }}</td>
+                <td style="color: {{ 'red' if p.pnl < 0 else '#0f0' }}">{{ p.pnl }}$</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</body>
+</html>
+"""
+
 @app.route('/')
 def index():
     return render_template_string(HTML, 
@@ -317,6 +309,7 @@ def index():
     )
 
 def start():
+    # C'est ici que j'ai corrigé le nom de la fonction appelée
     threading.Thread(target=run_trading_engine, daemon=True).start()
 
 start()

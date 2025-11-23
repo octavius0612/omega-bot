@@ -1,3 +1,4 @@
+import websocket
 import os
 import yfinance as yf
 import pandas_ta as ta
@@ -24,7 +25,7 @@ from github import Github
 
 app = Flask(__name__)
 
-# --- 1. CLÉS ---
+# --- 1. TOUTES LES CLÉS ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 HEARTBEAT_WEBHOOK_URL = os.environ.get("HEARTBEAT_WEBHOOK_URL")
@@ -34,21 +35,25 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
 
-# --- 2. CONFIG ---
-WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR"]
+# --- 2. CONFIGURATION ---
+WATCHLIST_LIVE = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR"]
 INITIAL_CAPITAL = 50000.0 
 
 brain = {
     "cash": INITIAL_CAPITAL, 
     "holdings": {}, 
-    # Ici, on stocke le CODE source des stratégies inventées par l'IA
-    "active_strategies": {}, 
+    # Paramètres évolutifs (L'IA les modifiera)
+    "params": {"rsi_buy": 30, "sl_atr": 2.0, "tp_atr": 4.0},
+    # Psychologie
+    "emotions": {"confidence": 50.0, "stress": 20.0, "euphoria": 0.0},
+    # Mémoire
+    "karma": {s: 10.0 for s in WATCHLIST_LIVE},
+    "trade_history": [],
     "total_pnl": 0.0,
-    "evolution_log": []
+    "last_prices": {}
 }
-bot_status = "Démarrage Évolution..."
+bot_status = "Démarrage OMNI-GOD..."
 log_queue = queue.Queue()
-short_term_memory = []
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
@@ -64,14 +69,17 @@ def logger_worker():
         try:
             while not log_queue.empty():
                 buffer.append(log_queue.get())
-            if buffer and (len(buffer) > 3 or time.time() - last_send > 1.5):
-                msg_block = "\n".join(buffer[:10]) 
-                buffer = buffer[10:]
+            if buffer and (len(buffer) > 5 or time.time() - last_send > 2.0):
+                msg_block = "\n".join(buffer[:15])
+                buffer = buffer[15:]
                 if LEARNING_WEBHOOK_URL:
                     requests.post(LEARNING_WEBHOOK_URL, json={"content": msg_block})
                 last_send = time.time()
             time.sleep(0.5)
         except: time.sleep(1)
+
+def send_trade_alert(msg):
+    if DISCORD_WEBHOOK_URL: requests.post(DISCORD_WEBHOOK_URL, json=msg)
 
 def send_summary(msg):
     if SUMMARY_WEBHOOK_URL: requests.post(SUMMARY_WEBHOOK_URL, json=msg)
@@ -81,7 +89,7 @@ def run_heartbeat():
         if HEARTBEAT_WEBHOOK_URL: requests.post(HEARTBEAT_WEBHOOK_URL, json={"content": "💓"})
         time.sleep(30)
 
-# --- 4. MÉMOIRE ---
+# --- 4. MÉMOIRE & PERSISTANCE ---
 def load_brain():
     global brain
     try:
@@ -99,153 +107,183 @@ def save_brain():
         content = json.dumps(brain, indent=4)
         try:
             f = repo.get_contents("brain.json")
-            repo.update_file("brain.json", "Evolution Save", content, f.sha)
+            repo.update_file("brain.json", "God Save", content, f.sha)
         except:
             repo.create_file("brain.json", "Init", content)
     except: pass
 
-# --- 5. L'ARCHITECTE DE CODE (AUTO-CODING) ---
-def generate_strategy_code():
-    """Demande à Gemini d'écrire une nouvelle stratégie en Python"""
-    
-    indicators = "RSI, EMA50, EMA200, ATR, ADX, VOLUME, CLOSE, OPEN, HIGH, LOW"
+# --- 5. MODULES TECHNIQUES AVANCÉS ---
+def calculate_fibonacci(df):
+    high = df['High'].max()
+    low = df['Low'].min()
+    return high - ((high - low) * 0.618)
+
+def get_heikin_ashi(df):
+    ha_close = (df['Open'] + df['High'] + df['Low'] + df['Close']) / 4
+    ha_open = (df['Open'].shift(1) + df['Close'].shift(1)) / 2
+    return "UP" if ha_close.iloc[-1] > ha_open.iloc[-1] else "DOWN"
+
+def check_whale(df):
+    vol = df['Volume'].iloc[-1]
+    avg = df['Volume'].rolling(20).mean().iloc[-1]
+    return (vol > avg * 2.5), f"Vol x{vol/avg:.1f}" if avg > 0 else "Vol Normal"
+
+def get_social_hype(symbol):
+    try:
+        url = f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"
+        r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
+        msgs = r['messages']
+        txt = " ".join([m['body'] for m in msgs[:10]])
+        polarity = TextBlob(txt).sentiment.polarity
+        return polarity
+    except: return 0
+
+def run_monte_carlo(prices):
+    returns = prices.pct_change().dropna()
+    sims = prices.iloc[-1] * (1 + np.random.normal(returns.mean(), returns.std(), (1000, 10)))
+    prob = np.sum(sims[:, -1] > prices.iloc[-1]) / 1000
+    return prob
+
+def get_vision_score(df, symbol):
+    try:
+        buf = io.BytesIO()
+        mpf.plot(df.tail(50), type='candle', style='nightclouds', savefig=buf)
+        buf.seek(0)
+        img = Image.open(buf)
+        res = model.generate_content(["Score achat (0.0-1.0) chartiste ?", img])
+        return float(res.text.strip())
+    except: return 0.5
+
+# --- 6. CERVEAU CENTRAL (CONSEIL + PSYCHO) ---
+def consult_god_council(symbol, rsi, fibo, whale, social, mc, vision):
+    # Ajustement selon l'humeur
+    mood = brain['emotions']
+    context_mood = f"Trader Stress: {mood['stress']}%, Confiance: {mood['confidence']}%"
     
     prompt = f"""
-    Agis comme un Trader Algorithmique Expert.
-    TA MISSION : Inventer une logique de trading court terme innovante.
+    CONSEIL SUPRÊME POUR {symbol}.
+    ÉTAT PSYCHOLOGIQUE: {context_mood}.
     
-    Données disponibles dans le dataframe 'df' (dernière ligne 'row') :
-    {indicators}
+    DONNÉES :
+    1. Technique: RSI {rsi:.1f}, Fibo (Support).
+    2. Flux: Baleine={whale}, Social={social:.2f}.
+    3. Futur (Quantique): {mc*100:.1f}% hausse.
+    4. Vision: {vision:.2f}/1.0.
     
-    Écris un snippet Python qui définit une variable 'signal'.
-    - signal = 100 (ACHAT)
-    - signal = -100 (VENTE/STOP)
-    - signal = 0 (RIEN)
+    DÉBAT ENTRE IAs :
+    - Chartiste: "La vision et Fibo disent..."
+    - Quant: "Les stats Monte Carlo disent..."
+    - Psychologue: "Le sentiment social et ton stress disent..."
     
-    Sois créatif ! Utilise la volatilité, les croisements, ou le volume.
-    Ne mets PAS de commentaires, juste le code.
+    Vote Final (OUI/NON) pour Achat.
+    JSON: {{"vote": "OUI", "score": 85, "reason": "Synthèse"}}
     """
     try:
         res = model.generate_content(prompt)
-        code = res.text.replace("```python", "").replace("```", "").strip()
-        # Nettoyage basique pour sécurité
-        if "import" in code or "os." in code: return None
-        return code
+        return json.loads(res.text.replace("```json","").replace("```",""))
+    except: return {"vote": "NON", "score": 0}
+
+def update_emotions(pnl):
+    e = brain['emotions']
+    if pnl > 0:
+        e['confidence'] = min(e['confidence']+5, 100)
+        e['stress'] = max(e['stress']-5, 0)
+        e['euphoria'] += 5
+    else:
+        e['confidence'] = max(e['confidence']-10, 10)
+        e['stress'] = min(e['stress']+10, 100)
+        e['euphoria'] = 0
+
+def get_kelly_bet(score, capital):
+    # Ajustement psycho
+    e = brain['emotions']
+    factor = 0.5 if e['stress'] > 70 else (1.2 if e['confidence'] > 80 else 1.0)
+    
+    win_prob = score / 100.0
+    if win_prob <= 0.5: return 0
+    kelly = win_prob - (1 - win_prob)
+    return min(capital * kelly * 0.5 * factor, capital * 0.25)
+
+# --- 7. AUTO-AMÉLIORATION (NUIT) ---
+def run_optimization_cycle():
+    fast_log("🧬 **OPTIMISEUR:** Analyse des trades passés pour améliorer les paramètres...")
+    
+    # On prend les derniers trades
+    history = brain.get('trade_history', [])[-20:]
+    if not history: return
+    
+    prompt = f"""
+    Historique récent: {json.dumps(history)}
+    Paramètres actuels: {json.dumps(brain['params'])}
+    
+    Si beaucoup de pertes, rends les paramètres plus stricts.
+    Si gains, optimise pour plus de profit.
+    Réponds JSON uniquement avec les nouveaux params.
+    """
+    try:
+        res = model.generate_content(prompt)
+        new_params = json.loads(res.text.replace("```json","").replace("```",""))
+        brain['params'] = new_params
+        
+        msg = {
+            "embeds": [{
+                "title": "🧬 ÉVOLUTION PARAMÉTRIQUE",
+                "description": f"Nouveaux réglages adoptés :\n{json.dumps(new_params, indent=2)}",
+                "color": 0x9b59b6
+            }]
+        }
+        send_summary(msg)
+        save_brain()
+    except: pass
+
+# --- 8. MOTEUR TEMPS RÉEL (WEBSOCKET) ---
+def on_message(ws, message):
+    global brain
+    try:
+        data = json.loads(message)
+        if data['type'] == 'trade':
+            for trade in data['data']:
+                symbol = trade['s']
+                price = trade['p']
+                brain['last_prices'][symbol] = price
+                
+                # CHECK VENTE FLASH (STOP LOSS)
+                if symbol in brain['holdings']:
+                    pos = brain['holdings'][symbol]
+                    if price < pos['stop']:
+                        pnl = (price - pos['entry']) * pos['qty']
+                        brain['cash'] += pos['qty'] * price
+                        brain['total_pnl'] += pnl
+                        del brain['holdings'][symbol]
+                        
+                        update_emotions(pnl)
+                        brain['trade_history'].append({"pnl": pnl, "reason": "STOP_LOSS"})
+                        
+                        send_trade_alert({"content": f"⚡ **FLASH SELL {symbol}** (Stop) | PnL: {pnl:.2f}$"})
+                        save_brain()
+    except: pass
+
+def on_error(ws, error): print("Reconnexion...")
+def on_close(ws, a, b): time.sleep(5); start_websocket()
+
+def start_websocket():
+    websocket.enableTrace(False)
+    ws = websocket.WebSocketApp(f"wss://ws.finnhub.io?token={FINNHUB_API_KEY}",
+                              on_message=on_message, on_error=on_error, on_close=on_close)
+    ws.on_open = lambda ws: [ws.send(json.dumps({"type": "subscribe", "symbol": s})) for s in WATCHLIST_LIVE]
+    ws.run_forever()
+
+# --- 9. BOUCLE ANALYSE (SCANNER) ---
+def get_full_data(s):
+    try:
+        df = yf.Ticker(s).history(period="1mo", interval="1h")
+        if df.empty: return None
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+        return df
     except: return None
 
-def explain_improvement(old_pnl, new_pnl, code):
-    """Demande à Gemini d'expliquer pourquoi la nouvelle stratégie est meilleure"""
-    prompt = f"""
-    Tu viens de créer une stratégie de trading.
-    Ancienne Performance : {old_pnl}$
-    Nouvelle Performance : {new_pnl}$
-    
-    Voici le code de la nouvelle stratégie :
-    {code}
-    
-    Explique en 1 phrase simple ce que tu as appris et pourquoi c'est mieux.
-    Exemple : "J'ai appris à utiliser l'ATR pour filtrer la volatilité, ce qui réduit les faux signaux."
-    """
-    try:
-        res = model.generate_content(prompt)
-        return res.text.strip()
-    except: return "Amélioration statistique détectée."
-
-# --- 6. MOTEUR DE TEST (BACKTEST) ---
-def backtest_strategy(code, symbol):
-    try:
-        df = yf.Ticker(symbol).history(period="1mo", interval="1h")
-        if df.empty: return -999
-        
-        # Calcul indicateurs
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['EMA50'] = ta.ema(df['Close'], length=50)
-        df['EMA200'] = ta.ema(df['Close'], length=200)
-        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-        df['ADX'] = ta.adx(df['High'], df['Low'], df['Close'])['ADX_14']
-        df = df.dropna()
-        
-        capital = 10000
-        position = 0
-        entry = 0
-        trades = 0
-        
-        for i, row in df.iterrows():
-            loc = {'row': row, 'signal': 0}
-            try: exec(code, {}, loc)
-            except: pass
-            
-            # Logique simple pour tester la qualité du signal d'entrée
-            if position == 0 and loc['signal'] == 100:
-                position = capital / row['Close']
-                entry = row['Close']
-                capital = 0
-            elif position > 0:
-                # Sortie fixe pour test standardisé
-                if row['High'] > entry * 1.05 or row['Low'] < entry * 0.97:
-                    capital = position * row['Close']
-                    position = 0
-                    trades += 1
-                    
-        final = capital + (position * df['Close'].iloc[-1])
-        return final - 10000
-    except: return -999
-
-# --- 7. BOUCLE D'ÉVOLUTION ---
-def run_evolution_loop():
-    global brain
-    fast_log("🧬 **GENESIS:** Démarrage du cycle d'auto-programmation.")
-    
-    while True:
-        # On travaille quand le marché est calme ou fermé
-        nyc = pytz.timezone('America/New_York')
-        now = datetime.now(nyc)
-        market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
-        
-        if not market_open or len(brain['active_strategies']) < 1:
-            s = random.choice(WATCHLIST)
-            
-            # 1. Création
-            code = generate_strategy_code()
-            if code:
-                # 2. Test
-                pnl = backtest_strategy(code, s)
-                
-                # Comparaison avec la performance moyenne actuelle
-                avg_pnl = 0 # Placeholder
-                
-                if pnl > 200: # Si la stratégie est viable
-                    # 3. Explication (Méta-Cognition)
-                    explanation = explain_improvement(0, pnl, code)
-                    
-                    # Stockage
-                    strat_id = f"STRAT_{int(time.time())}"
-                    brain['active_strategies'][strat_id] = {"code": code, "pnl": pnl, "symbol": s}
-                    
-                    # Rapport
-                    msg = {
-                        "embeds": [{
-                            "title": "🧬 ÉVOLUTION DU CODE",
-                            "color": 0x9b59b6,
-                            "description": f"**J'ai réécrit mon propre code pour {s}.**",
-                            "fields": [
-                                {"name": "Performance Test", "value": f"+{pnl:.2f}$", "inline": True},
-                                {"name": "Ce que j'ai appris", "value": explanation, "inline": False},
-                                {"name": "Code Généré", "value": f"```python\n{code[:200]}...\n```", "inline": False}
-                            ]
-                        }]
-                    }
-                    send_summary(msg)
-                    save_brain()
-                else:
-                    fast_log(f"🗑️ Code testé et rejeté (PnL: {pnl:.2f}$). J'essaie autre chose.")
-            
-            time.sleep(30)
-        else:
-            time.sleep(60)
-
-# --- 8. TRADING LIVE (Utilise le code généré) ---
-def run_trading():
+def run_scanner():
     global brain, bot_status
     load_brain()
     
@@ -255,66 +293,75 @@ def run_trading():
             now = datetime.now(nyc)
             market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
             
-            if market_open:
-                bot_status = "🟢 Trading Auto-Codé"
-                
-                # VENTES (Standard)
-                for s in list(brain['holdings'].keys()):
-                    # ... (Gestion classique SL/TP pour sécurité) ...
-                    pass # Simplifié pour l'espace
-
-                # ACHATS (Basés sur les stratégies générées)
-                for s in WATCHLIST:
+            if not market_open:
+                bot_status = "🌙 Nuit (Optimisation)"
+                run_optimization_cycle()
+                time.sleep(600) # Pause 10 min la nuit
+                continue
+            
+            bot_status = "🟢 SCAN COMPLET"
+            
+            # ACHAT (Scan toutes les 60s, exécution flash via websocket pour la vente)
+            if len(brain['holdings']) < 5:
+                for s in WATCHLIST_LIVE:
                     if s in brain['holdings']: continue
                     
-                    # On cherche si on a une stratégie spécialisée pour cette action
-                    # Ou on utilise une générique
-                    try:
-                        df = yf.Ticker(s).history(period="1mo", interval="15m")
-                        if df.empty: continue
-                        # Indicateurs
-                        df['RSI'] = ta.rsi(df['Close'], length=14)
-                        df['EMA50'] = ta.ema(df['Close'], length=50)
-                        df['EMA200'] = ta.ema(df['Close'], length=200)
-                        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-                        df['ADX'] = ta.adx(df['High'], df['Low'], df['Close'])['ADX_14']
-                        row = df.iloc[-1]
+                    df = get_full_data(s)
+                    if df is None: continue
+                    row = df.iloc[-1]
+                    
+                    # Filtre Rapide (Paramètres Appris)
+                    if row['RSI'] < brain['params']['rsi_buy']:
                         
-                        # On teste toutes les stratégies actives
-                        for strat_id, strat in brain['active_strategies'].items():
-                            loc = {'row': row, 'signal': 0}
-                            try:
-                                exec(strat['code'], {}, loc)
-                                if loc['signal'] == 100:
-                                    # SIGNAL !
-                                    price = row['Close']
-                                    qty = 500 / price
-                                    sl = price - (row['ATR'] * 2)
-                                    tp = price + (row['ATR'] * 3)
+                        # ANALYSE COMPLETE
+                        whale, _ = check_whale(df)
+                        social = get_social_hype(s)
+                        mc = run_monte_carlo(df['Close'])
+                        
+                        if mc > 0.60:
+                            vis = get_vision_score(df, s)
+                            fibo = calculate_fibonacci(df)
+                            
+                            council = consult_god_council(s, row['RSI'], fibo, whale, social, mc, vis)
+                            
+                            fast_log(f"🧠 **{s}:** Score {council['score']} | Vote: {council['vote']}")
+                            
+                            if council['vote'] == "OUI":
+                                price = row['Close']
+                                bet = calculate_kelly_bet(council['score'], brain['cash'])
+                                
+                                if bet > 200:
+                                    qty = bet / price
+                                    sl = price - (row['ATR'] * brain['params']['sl_atr'])
+                                    tp = price + (row['ATR'] * brain['params']['tp_atr'])
                                     
                                     brain['holdings'][s] = {"qty": qty, "entry": price, "stop": sl, "tp": tp}
-                                    brain['cash'] -= 500
+                                    brain['cash'] -= bet
                                     
-                                    if DISCORD_WEBHOOK_URL:
-                                        requests.post(DISCORD_WEBHOOK_URL, json={"content": f"🧬 **ACHAT ÉVOLUTIF : {s}**\nStratégie: `{strat_id}`"})
+                                    send_trade_alert({
+                                        "embeds": [{
+                                            "title": f"🌌 ACHAT DIVIN : {s}",
+                                            "description": council['reason'],
+                                            "color": 0x2ecc71,
+                                            "fields": [
+                                                {"name": "Stats", "value": f"MC:{mc:.2f} | Vis:{vis:.2f}", "inline": True},
+                                                {"name": "Gestion", "value": f"Mise: {bet:.0f}$", "inline": True}
+                                            ]
+                                        }]
+                                    })
                                     save_brain()
-                                    break
-                            except: pass
-                    except: pass
-            else:
-                bot_status = "🌙 Nuit (Codage)"
             
             time.sleep(60)
         except: time.sleep(10)
 
 @app.route('/')
-def index(): return f"<h1>EVOLUTION V69</h1><p>{bot_status}</p>"
+def index(): return f"<h1>OMNI-GOD V72</h1><p>{bot_status}</p>"
 
 def start_threads():
-    threading.Thread(target=run_trading, daemon=True).start()
+    threading.Thread(target=start_websocket, daemon=True).start()
+    threading.Thread(target=run_scanner, daemon=True).start()
     threading.Thread(target=run_heartbeat, daemon=True).start()
     threading.Thread(target=logger_worker, daemon=True).start()
-    threading.Thread(target=run_evolution_loop, daemon=True).start()
 
 load_brain()
 start_threads()

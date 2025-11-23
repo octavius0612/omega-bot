@@ -1,14 +1,16 @@
 {
     "cash": 50000.0,
     "holdings": {},
+    "paper_cash": 1000.0,
+    "paper_holdings": {},
     "genome": {
-        "rsi_buy": 39,
-        "sl_mult": 1.018176731451796,
-        "tp_mult": 3.5101805793124967
+        "rsi_buy": 43,
+        "sl_mult": 1.0,
+        "tp_mult": 3.8
     },
     "stats": {
-        "generation": 146,
-        "best_pnl": 77.24698156331323
+        "generation": 150,
+        "best_pnl": 88.31335619643426
     },
     "emotions": {
         "confidence": 50.0,
@@ -40,6 +42,7 @@
         "RSI40|LOSS",
         "RSI38|LOSS"
     ],
+    "learning_journal": [],
     "total_pnl": 0.0,
     "memory_bank": [],
     "best_params": {

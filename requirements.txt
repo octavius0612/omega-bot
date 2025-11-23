@@ -12,5 +12,4 @@ PyGithub
 textblob
 matplotlib
 mplfinance
-Pillow
-websocket-client
+alpaca-trade-api

@@ -25,7 +25,7 @@ from github import Github
 app = Flask(__name__)
 
 # ==============================================================================
-# 1. CLÉS & CONFIGURATION
+# 1. CLÉS & CONFIGURATION OMEGA
 # ==============================================================================
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
@@ -35,139 +35,42 @@ GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
 FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
 
-WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR", "GOOG", "META"]
+WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR"]
 INITIAL_CAPITAL = 50000.0 
-SIMULATION_COUNT = 2000 
+SIMULATION_COUNT = 2000
 
+# CERVEAU COMPLET
 brain = {
     "cash": INITIAL_CAPITAL, 
     "holdings": {}, 
-    # ADN Évolutif
-    "genome": {"rsi_buy": 30, "sl_mult": 2.0, "tp_mult": 3.5},
-    # Mémoire
-    "stats": {"generation": 0, "best_pnl": 0.0},
-    "emotions": {"confidence": 50.0, "stress": 20.0, "euphoria": 0.0},
-    "karma": {s: 10.0 for s in WATCHLIST},
-    "black_box": [],
-    "total_pnl": 0.0
+    "trade_history": [],
+    "total_pnl": 0.0,
+    # Réseau Neuronal (Poids Synaptiques)
+    "synapses": {
+        "w_rsi": -0.5, "w_trend": 0.5, "w_vol": 0.2, "w_social": 0.1, "w_quant": 0.6, "w_vision": 0.4, "w_bias": 0.0
+    },
+    # Mémoire Émotionnelle
+    "emotions": {"confidence": 50.0, "stress": 20.0},
+    # Mémoire des traumatismes (Black Box)
+    "black_box": []
 }
 
 bot_state = {
     "status": "Booting Omega...",
     "last_decision": "Init...",
-    "last_log": "Chargement modules...",
-    "web_logs": []
+    "last_log": "Chargement modules..."
 }
 
 log_queue = queue.Queue()
-short_term_memory = []
 
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
 # ==============================================================================
-# 2. DASHBOARD WEB (INTERFACE VISUELLE)
-# ==============================================================================
-DASHBOARD_HTML = """
-<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="5">
-    <title>OMEGA SINGULARITY</title>
-    <style>
-        :root { --bg: #050505; --card: #0f1115; --text: #00ff41; --red: #ff0033; --accent: #00ccff; }
-        body { background: var(--bg); color: var(--text); font-family: 'Consolas', monospace; padding: 20px; margin: 0; }
-        .container { max_width: 1400px; margin: 0 auto; }
-        .header { border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; }
-        .card { background: var(--card); border: 1px solid #333; padding: 15px; border-radius: 4px; }
-        h2 { margin: 0 0 10px 0; font-size: 16px; color: #fff; opacity: 0.7; }
-        .big-val { font-size: 28px; font-weight: bold; color: #fff; }
-        .log-box { height: 300px; overflow-y: auto; font-size: 12px; border-top: 1px solid #333; margin-top: 10px; padding-top: 5px; opacity: 0.8; }
-        .log-line { margin-bottom: 4px; border-bottom: 1px solid #111; }
-        table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        th { text-align: left; color: #666; border-bottom: 1px solid #333; }
-        td { padding: 5px 0; border-bottom: 1px solid #1a1a1a; }
-        .green { color: var(--text); } .red { color: var(--red); }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>👁️ OMEGA SINGULARITY <span style="font-size:12px; color:#666">V90</span></h1>
-            <div>{{ status }}</div>
-        </div>
-        
-        <div class="grid">
-            <div class="card">
-                <h2>CAPITAL TOTAL</h2>
-                <div class="big-val">${{ total_equity }}</div>
-                <div>Cash: ${{ cash }}</div>
-                <div>PnL: <span class="{{ 'green' if total_pnl >= 0 else 'red' }}">{{ total_pnl }}$</span></div>
-            </div>
-            
-            <div class="card">
-                <h2>ÉTAT NEURONAL</h2>
-                <div>Confiance: {{ confidence }}%</div>
-                <div>Stress: {{ stress }}%</div>
-                <div>Euphorie: {{ euphoria }}%</div>
-            </div>
-            
-            <div class="card">
-                <h2>GÉNÉTIQUE (Gen #{{ generation }})</h2>
-                <div>RSI Trigger: <b>< {{ genome.rsi_buy }}</b></div>
-                <div>Stop Loss: <b>{{ genome.sl_mult }} ATR</b></div>
-                <div>Take Profit: <b>{{ genome.tp_mult }} ATR</b></div>
-            </div>
-        </div>
-
-        <br>
-
-        <div class="grid" style="grid-template-columns: 2fr 1fr;">
-            <div class="card">
-                <h2>POSITIONS ACTIVES</h2>
-                {% if holdings %}
-                <table>
-                    <thead><tr><th>ACTIF</th><th>QTÉ</th><th>ENTRÉE</th><th>ACTUEL</th><th>PNL</th></tr></thead>
-                    <tbody>
-                        {% for p in holdings %}
-                        <tr>
-                            <td>{{ p.symbol }}</td>
-                            <td>{{ p.qty }}</td>
-                            <td>{{ p.entry }}</td>
-                            <td>{{ p.current }}</td>
-                            <td class="{{ 'green' if p.pnl >= 0 else 'red' }}">{{ p.pnl }}$</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-                {% else %}
-                <div style="text-align:center; padding:20px; color:#666">SCAN EN COURS... AUCUNE POSITION</div>
-                {% endif %}
-            </div>
-
-            <div class="card">
-                <h2>FLUX DE PENSÉE (LIVE)</h2>
-                <div class="log-box">
-                    {% for log in logs %}
-                    <div class="log-line">{{ log }}</div>
-                    {% endfor %}
-                </div>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-# ==============================================================================
-# 3. SYSTÈME DE LOGGING & MÉMOIRE
+# 2. SYSTÈME NERVEUX (LOGGING & COMMS)
 # ==============================================================================
 def fast_log(text):
     log_queue.put(text)
-    bot_state['web_logs'].insert(0, f"[{datetime.now().strftime('%H:%M:%S')}] {text}")
-    if len(bot_state['web_logs']) > 50: bot_state['web_logs'] = bot_state['web_logs'][:50]
 
 def logger_worker():
     buffer = []
@@ -176,11 +79,12 @@ def logger_worker():
         try:
             while not log_queue.empty():
                 buffer.append(log_queue.get())
-            if buffer and (len(buffer) > 5 or time.time() - last_send > 1.5):
+            if buffer and (len(buffer) > 5 or time.time() - last_send > 2.0):
                 msg_block = "\n".join(buffer[:12])
                 buffer = buffer[12:]
                 if LEARNING_WEBHOOK_URL:
-                    requests.post(LEARNING_WEBHOOK_URL, json={"content": msg_block})
+                    try: requests.post(LEARNING_WEBHOOK_URL, json={"content": msg_block})
+                    except: pass
                 last_send = time.time()
             time.sleep(0.2)
         except: time.sleep(1)
@@ -193,6 +97,9 @@ def run_heartbeat():
         if HEARTBEAT_WEBHOOK_URL: requests.post(HEARTBEAT_WEBHOOK_URL, json={"content": "💓"})
         time.sleep(30)
 
+# ==============================================================================
+# 3. HIPPOCAMPE (MÉMOIRE)
+# ==============================================================================
 def load_brain():
     global brain
     try:
@@ -200,7 +107,7 @@ def load_brain():
         repo = g.get_repo(REPO_NAME)
         c = repo.get_contents("brain.json")
         loaded = json.loads(c.decoded_content.decode())
-        if "cash" in loaded: brain.update(loaded)
+        if "synapses" in loaded: brain.update(loaded)
     except: pass
 
 def save_brain():
@@ -216,8 +123,42 @@ def save_brain():
     except: pass
 
 # ==============================================================================
-# 4. LES 6 SENS (ANALYSE MULTIMODALE)
+# 4. MOTEUR NEURONAL (PERCEPTRON)
 # ==============================================================================
+class NeuralNet:
+    def activate(self, inputs):
+        w = brain['synapses']
+        # Calcul du score d'activation (Somme pondérée des sens)
+        z = (inputs['rsi_norm'] * w['w_rsi']) + \
+            (inputs['trend_norm'] * w['w_trend']) + \
+            (inputs['vol_norm'] * w['w_vol']) + \
+            (inputs['social'] * w['w_social']) + \
+            (inputs['quant'] * w['w_quant']) + \
+            (inputs['vision'] * w['w_vision']) + \
+            w['w_bias']
+        return 1 / (1 + np.exp(-z)) # Sigmoid
+
+    def train(self, inputs, outcome):
+        # Apprentissage par renforcement (Backpropagation simple)
+        lr = 0.01 # Learning rate
+        pred = self.activate(inputs)
+        error = outcome - pred
+        w = brain['synapses']
+        
+        w['w_rsi'] += lr * error * inputs['rsi_norm']
+        w['w_quant'] += lr * error * inputs['quant']
+        w['w_vision'] += lr * error * inputs['vision']
+        w['w_bias'] += lr * error
+        
+        brain['synapses'] = w # Sauvegarde des nouveaux poids
+
+neural_engine = NeuralNet()
+
+# ==============================================================================
+# 5. LES SENS (MODULES D'ANALYSE)
+# ==============================================================================
+
+# A. QUANTIQUE
 def run_monte_carlo(prices):
     try:
         returns = prices.pct_change().dropna()
@@ -225,17 +166,19 @@ def run_monte_carlo(prices):
         return np.sum(sims[:, -1] > prices.iloc[-1]) / SIMULATION_COUNT
     except: return 0.5
 
+# B. VISION
 def get_vision_score(df):
     try:
         buf = io.BytesIO()
-        mpf.plot(df.tail(60), type='candle', style='nightclouds', savefig=buf)
+        mpf.plot(df.tail(50), type='candle', style='nightclouds', savefig=buf)
         buf.seek(0)
         img = Image.open(buf)
-        res = model.generate_content(["Score achat (0.0-1.0)?", img])
+        res = model.generate_content(["Analyse technique visuelle. Score d'achat 0.0 à 1.0. Réponds chiffre uniquement.", img])
         return float(res.text.strip())
     except: return 0.5
 
-def get_social_hype(symbol):
+# C. SOCIAL
+def get_social_sentiment(symbol):
     try:
         url = f"https://api.stocktwits.com/api/2/streams/symbol/{symbol}.json"
         r = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).json()
@@ -243,155 +186,103 @@ def get_social_hype(symbol):
         return TextBlob(txt).sentiment.polarity
     except: return 0
 
+# D. BALEINE
 def check_whale(df):
-    try:
-        vol = df['Volume'].iloc[-1]
-        avg = df['Volume'].rolling(20).mean().iloc[-1]
-        return (vol > avg * 2.5), f"x{vol/avg:.1f}"
-    except: return False, "x1.0"
-
-def get_tech_indicators(df):
-    high = df['High'].max()
-    low = df['Low'].min()
-    fibo = high - ((high - low) * 0.618)
-    return fibo
+    vol = df['Volume'].iloc[-1]
+    avg = df['Volume'].rolling(20).mean().iloc[-1]
+    return (vol > avg * 2.5), f"x{vol/avg:.1f}" if avg > 0 else "N/A"
 
 # ==============================================================================
-# 5. LE CERVEAU CENTRAL (DÉCISION)
-# ==============================================================================
-def consult_council(s, rsi, mc, vis, soc, whale):
-    mood = brain['emotions']
-    prompt = f"""
-    DECISION TRADE {s}.
-    Mood: Stress {mood['stress']}%, Confiance {mood['confidence']}%.
-    Data:
-    - Quantum: {mc*100:.0f}% prob.
-    - Vision: {vis:.2f}/1.0.
-    - Social: {soc:.2f}.
-    - Baleine: {whale}.
-    - RSI: {rsi:.1f}.
-    
-    Si (Quantum > 60% ET Vision > 0.6) OU (Baleine ET RSI < 30): BUY.
-    Sinon WAIT.
-    JSON: {{"vote": "BUY/WAIT", "reason": "..."}}
-    """
-    try:
-        res = model.generate_content(prompt)
-        return json.loads(res.text.replace("```json","").replace("```",""))
-    except: return {"vote": "WAIT", "reason": "Erreur"}
-
-def update_emotions(pnl):
-    e = brain['emotions']
-    if pnl > 0:
-        e['confidence'] = min(e['confidence']+5, 100)
-        e['stress'] = max(e['stress']-5, 0)
-        e['euphoria'] += 5
-    else:
-        e['confidence'] = max(e['confidence']-10, 10)
-        e['stress'] = min(e['stress']+10, 100)
-        e['euphoria'] = 0
-
-def get_kelly_bet(score, capital):
-    e = brain['emotions']
-    factor = 0.5 if e['stress'] > 70 else (1.2 if e['confidence'] > 80 else 1.0)
-    win_prob = score / 100.0
-    if win_prob <= 0.5: return 0
-    kelly = win_prob - (1 - win_prob)
-    return min(capital * kelly * 0.5 * factor, capital * 0.20)
-
-# ==============================================================================
-# 6. MOTEUR D'APPRENTISSAGE (GÉNÉTIQUE & RÊVE)
-# ==============================================================================
-def run_dream_learning():
-    global brain, bot_state
-    cache = {}
-    
-    # Préchargement
-    for s in WATCHLIST:
-        try:
-            df = yf.Ticker(s).history(period="1mo", interval="1h")
-            if not df.empty:
-                df['RSI'] = ta.rsi(df['Close'], length=14)
-                df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
-                cache[s] = df.dropna()
-        except: pass
-
-    while True:
-        # Horaire
-        nyc = pytz.timezone('America/New_York')
-        now = datetime.now(nyc)
-        market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
-        
-        if market_open:
-            time.sleep(60)
-            continue
-            
-        bot_state['status'] = f"🌙 RÊVE (Gen #{brain['stats']['generation']})"
-        brain['stats']['generation'] += 1
-        
-        # Mutation
-        parent = brain['genome']
-        mutant = {
-            "rsi_buy": max(15, min(60, parent['rsi_buy'] + random.randint(-5, 5))),
-            "sl_mult": max(1.0, parent['sl_mult'] + random.uniform(-0.5, 0.5)),
-            "tp_mult": max(1.5, parent['tp_mult'] + random.uniform(-0.5, 0.5))
-        }
-        
-        s = random.choice(list(cache.keys()))
-        df = cache[s]
-        start_idx = random.randint(0, len(df) - 50)
-        subset = df.iloc[start_idx : start_idx+50]
-        
-        pnl = 0
-        for i in range(len(subset)-10):
-            row = subset.iloc[i]
-            if row['RSI'] < mutant['rsi_buy']:
-                entry = row['Close']
-                sl = entry - (row['ATR'] * mutant['sl_mult'])
-                tp = entry + (row['ATR'] * mutant['tp_mult'])
-                
-                future = subset.iloc[i+1 : i+6]
-                if not future.empty:
-                    if future['High'].max() > tp: pnl += (tp - entry)
-                    elif future['Low'].min() < sl: pnl -= (entry - sl)
-        
-        if pnl > brain['stats']['best_pnl']:
-            brain['stats']['best_pnl'] = pnl
-            brain['genome'] = mutant
-            save_brain()
-            fast_log(f"🧬 **ÉVOLUTION:** Nouveau Gène RSI<{mutant['rsi_buy']} | Gain +{pnl:.2f}$")
-        else:
-            fast_log(f"🧪 **TEST MUTANT {s}:** PnL {pnl:.2f}$ (Inférieur au record).")
-            
-        time.sleep(5)
-
-# ==============================================================================
-# 7. GHOST BROKER & TRADING LIVE
+# 6. GHOST BROKER & GESTION
 # ==============================================================================
 class GhostBroker:
     def get_price(self, symbol):
         try: return yf.Ticker(symbol).fast_info['last_price']
         except: return None
     def get_portfolio(self):
-        equity = brain['cash']
-        positions = []
+        eq = brain['cash']
+        pos = []
         for s, d in brain['holdings'].items():
             p = self.get_price(s)
             if p:
                 val = d['qty'] * p
-                equity += val
+                eq += val
                 pnl = val - (d['qty'] * d['entry'])
-                pct = (pnl / (d['qty'] * d['entry'])) * 100
-                positions.append({"symbol": s, "qty": d['qty'], "entry": d['entry'], "current": p, "pnl": round(pnl, 2), "pct": round(pct, 2)})
-        return equity, positions
+                pos.append({"symbol": s, "qty": d['qty'], "entry": d['entry'], "current": p, "pnl": round(pnl, 2)})
+        return eq, pos
 
 broker = GhostBroker()
 
+def update_emotions(pnl):
+    e = brain['emotions']
+    if pnl > 0: e['confidence'] = min(e['confidence']+5, 100); e['stress'] = max(e['stress']-5, 0)
+    else: e['confidence'] = max(e['confidence']-10, 10); e['stress'] = min(e['stress']+10, 100)
+
+# ==============================================================================
+# 7. APPRENTISSAGE CONTINU (LE RÊVE)
+# ==============================================================================
+def run_dream_learning():
+    global brain
+    cache = {}
+    fast_log("🧠 **RÊVE:** Démarrage de l'entraînement neuronal en fond.")
+    
+    while True:
+        try:
+            # On s'entraîne quand le marché est fermé
+            nyc = pytz.timezone('America/New_York')
+            now = datetime.now(nyc)
+            market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
+            
+            if market_open:
+                time.sleep(300)
+                continue
+                
+            s = random.choice(WATCHLIST)
+            if s not in cache or random.random() < 0.1:
+                try:
+                    df = yf.Ticker(s).history(period="1mo", interval="1h")
+                    if not df.empty:
+                        df['RSI'] = ta.rsi(df['Close'], length=14)
+                        df['SMA50'] = ta.sma(df['Close'], length=50)
+                        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+                        cache[s] = df.dropna()
+                except: pass
+
+            if s in cache:
+                df = cache[s]
+                idx = random.randint(50, len(df)-10)
+                row = df.iloc[idx]
+                
+                # Simulation Inputs
+                inputs = {
+                    "rsi_norm": row['RSI']/100,
+                    "trend_norm": 1.0 if row['Close'] > row['SMA50'] else -1.0,
+                    "vol_norm": min(row['ATR']/row['Close']*100, 1.0),
+                    "social": 0.0, # Simulé
+                    "quant": 0.5, # Simulé pour vitesse
+                    "vision": 0.5 # Simulé
+                }
+                
+                # Futur
+                future = df.iloc[idx+5]['Close']
+                target = 1.0 if future > row['Close'] * 1.01 else 0.0
+                
+                # Entraînement Neurone
+                error = neural_engine.train(inputs, target)
+                
+                if abs(error) < 0.1: # Bonne prédiction
+                    fast_log(f"🎓 **APPRENTISSAGE:** Neurone affiné sur {s} (Erreur: {error:.2f})")
+                    save_brain()
+            
+            time.sleep(2)
+        except: time.sleep(10)
+
+# ==============================================================================
+# 8. MOTEUR TRADING LIVE
+# ==============================================================================
 def run_trading():
     global brain, bot_state
     load_brain()
-    
-    fast_log("🌌 **OMEGA SINGULARITY:** Tous systèmes nominaux.")
     
     while True:
         try:
@@ -400,7 +291,7 @@ def run_trading():
             market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
             
             if market_open:
-                bot_state['status'] = "🟢 TRADING ACTIF"
+                bot_state['status'] = "🟢 TRADING NEURONAL"
                 
                 # VENTES
                 for s in list(brain['holdings'].keys()):
@@ -420,7 +311,7 @@ def run_trading():
                         update_emotions(pnl)
                         
                         col = 0x2ecc71 if pnl > 0 else 0xe74c3c
-                        send_trade_alert({"embeds": [{"title": f"{exit_r} : {s}", "description": f"PnL: **{pnl:.2f}$**", "color": col}]})
+                        send_trade_alert({"embeds": [{"title": f"{exit_r} {s}", "description": f"PnL: **{pnl:.2f}$**", "color": col}]})
                         save_brain()
 
                 # ACHATS
@@ -431,60 +322,131 @@ def run_trading():
                         try:
                             df = yf.Ticker(s).history(period="1mo", interval="1h")
                             if df.empty: continue
+                            
                             df['RSI'] = ta.rsi(df['Close'], length=14)
                             df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+                            df['SMA50'] = ta.sma(df['Close'], length=50)
                             row = df.iloc[-1]
                             
-                            # Filtre Génétique
-                            if row['RSI'] < brain['genome']['rsi_buy']:
-                                fast_log(f"🔎 **SCAN {s}:** Signal RSI. Lancement Analyse Profonde...")
+                            # COLLECTE DES SENS (LOURD)
+                            # On filtre d'abord par RSI pour économiser les ressources
+                            if row['RSI'] < 45:
+                                fast_log(f"🔎 **SCAN {s}:** Signal détecté. Activation des sens...")
                                 
-                                mc = run_monte_carlo(df['Close'])
-                                vis = get_vision_score(df)
-                                soc = get_social_hype(s)
-                                whl, wh_msg = check_whale(df)
+                                # 1. Quantique
+                                mc_prob = run_monte_carlo(df['Close'])
+                                # 2. Vision
+                                vis_score = get_vision_score(df)
+                                # 3. Social
+                                soc_score = get_social_sentiment(s)
+                                # 4. Baleine
+                                is_whale, wh_msg = check_whale(df)
                                 
-                                council = consult_council(s, row['RSI'], mc, vis, soc, whl)
-                                fast_log(f"🧠 **{s}:** MC:{mc:.2f} | Vis:{vis:.2f} | {wh_msg} => {council['vote']}")
+                                # INPUTS NEURONAUX
+                                inputs = {
+                                    "rsi_norm": row['RSI']/100,
+                                    "trend_norm": 1.0 if row['Close'] > row['SMA50'] else -1.0,
+                                    "vol_norm": min(row['ATR']/row['Close']*100, 1.0),
+                                    "social": soc_score,
+                                    "quant": mc_prob,
+                                    "vision": vis_score
+                                }
                                 
-                                if council['vote'] == "BUY":
+                                # ACTIVATION DU NEURONE
+                                activation = neural_engine.activate(inputs)
+                                bot_state['last_decision'] = f"{s}: {activation*100:.1f}%"
+                                
+                                fast_log(f"🧠 **{s}:** Neurone: {activation:.2f} | Vis:{vis_score:.2f} | MC:{mc_prob:.2f}")
+                                
+                                # DÉCISION FINALE
+                                if activation > 0.85:
                                     price = row['Close']
-                                    bet = calculate_kelly_bet(0.7, brain['cash']) # Score simplifié
-                                    if bet > 200:
-                                        qty = bet / price
-                                        sl = price - (row['ATR'] * brain['genome']['sl_mult'])
-                                        tp = price + (row['ATR'] * brain['genome']['tp_mult'])
-                                        
-                                        brain['holdings'][s] = {"qty": qty, "entry": price, "stop": sl, "tp": tp}
-                                        brain['cash'] -= bet
-                                        
-                                        send_trade_alert({
-                                            "embeds": [{"title": f"🌌 ACHAT OMEGA : {s}", "description": council['reason'], "color": 0x2ecc71}]
-                                        })
-                                        save_brain()
+                                    # Kelly + Psycho
+                                    bet_factor = 1.2 if brain['emotions']['confidence'] > 80 else 0.8
+                                    qty = (500 * bet_factor) / price
+                                    
+                                    sl = price - (row['ATR'] * 2.0)
+                                    tp = price + (row['ATR'] * 3.5)
+                                    
+                                    brain['holdings'][s] = {"qty": qty, "entry": price, "stop": sl, "tp": tp}
+                                    brain['cash'] -= (500 * bet_factor)
+                                    
+                                    msg = {
+                                        "title": f"🌌 ACHAT OMEGA : {s}",
+                                        "description": f"**Activation Neuronale: {activation:.4f}**",
+                                        "color": 0x2ecc71,
+                                        "fields": [
+                                            {"name": "Vision", "value": f"{vis_score:.2f}", "inline": True},
+                                            {"name": "Quantique", "value": f"{mc_prob:.2f}", "inline": True},
+                                            {"name": "Confiance", "value": f"{brain['emotions']['confidence']}%", "inline": True}
+                                        ]
+                                    }
+                                    send_trade_alert(msg)
+                                    save_brain()
                         except: pass
             else:
                 bot_state['status'] = "🌙 NUIT"
             
-            time.sleep(60)
+            time.sleep(30)
         except: time.sleep(10)
 
-# --- 8. ROUTE WEB ---
+# --- 9. DASHBOARD WEB ---
+HTML = """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta http-equiv="refresh" content="10">
+    <title>OMEGA V92</title>
+    <style>
+        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+        .card { border: 1px solid #333; padding: 15px; margin-bottom: 20px; }
+        h1 { margin: 0; color: #fff; }
+        table { width: 100%; border-collapse: collapse; color: #aaa; }
+        td { border-bottom: 1px solid #222; padding: 5px; }
+    </style>
+</head>
+<body>
+    <h1>👁️ OMEGA BRAIN V92</h1>
+    <div class="card">
+        <h3>STATUS: {{ status }}</h3>
+        <h2>CAPITAL: ${{ equity }}</h2>
+        <p>Log: {{ last_log }}</p>
+    </div>
+    <div class="card">
+        <h3>POIDS SYNAPTIQUES (Cerveau)</h3>
+        <ul>
+        {% for k, v in synapses.items() %}
+            <li>{{ k }}: {{ v|round(4) }}</li>
+        {% endfor %}
+        </ul>
+    </div>
+    <div class="card">
+        <table>
+            <tr><th>ACTIF</th><th>QTE</th><th>PRIX MOY</th><th>VALEUR</th><th>PNL</th></tr>
+            {% for p in positions %}
+            <tr>
+                <td>{{ p.symbol }}</td>
+                <td>{{ p.qty|round(2) }}</td>
+                <td>{{ p.entry }}</td>
+                <td>{{ (p.qty * p.current)|round(2) }}</td>
+                <td style="color: {{ 'red' if p.pnl < 0 else '#0f0' }}">{{ p.pnl }}$</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</body>
+</html>
+"""
+
 @app.route('/')
 def index():
     eq, pos = broker.get_portfolio()
-    return render_template_string(DASHBOARD_HTML, 
-        total_equity=f"{eq:,.2f}", 
-        cash=f"{brain['cash']:,.2f}", 
-        total_pnl=f"{brain['total_pnl']:,.2f}",
-        status=bot_state['status'],
-        confidence=brain['emotions']['confidence'],
-        stress=brain['emotions']['stress'],
-        euphoria=brain['emotions']['euphoria'],
-        generation=brain['stats']['generation'],
-        genome=brain['genome'],
-        holdings=pos,
-        logs=bot_state['web_logs']
+    return render_template_string(HTML, 
+        equity=f"{eq:,.2f}", 
+        status=bot_state['status'], 
+        positions=pos,
+        last_log=bot_state['last_log'],
+        synapses=brain['synapses']
     )
 
 def start_threads():

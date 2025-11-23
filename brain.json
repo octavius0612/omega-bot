@@ -1,7 +1,7 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": 400.0,
+    "paper_cash": 200.0,
     "paper_holdings": {
         "AMD": {
             "qty": 2.0,
@@ -14,6 +14,12 @@
             "entry": 100.0,
             "stop": 98.0,
             "tp": 107.6
+        },
+        "GOOG": {
+            "qty": 2.0,
+            "entry": 100.0,
+            "stop": 98.0,
+            "tp": 107.6
         }
     },
     "genome": {
@@ -22,7 +28,7 @@
         "tp_mult": 3.8
     },
     "stats": {
-        "generation": 217,
+        "generation": 295,
         "best_pnl": 88.31335619643426
     },
     "emotions": {

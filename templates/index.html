@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="refresh" content="5">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OMEGA SINGULARITY</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0d1117;
+            --card-bg: #161b22;
+            --border-color: #30363d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --accent-green: #238636;
+            --accent-red: #da3633;
+            --accent-blue: #58a6ff;
+            --accent-gold: #d29922;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container { max_width: 1400px; margin: 0 auto; }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            letter-spacing: -0.5px;
+        }
+
+        .live-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background-color: var(--accent-green);
+            border-radius: 50%;
+            margin-right: 8px;
+            box-shadow: 0 0 10px var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+
+        /* Grille */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        /* Cartes */
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 20px;
+            transition: transform 0.2s ease;
+        }
+
+        .card:hover { border-color: var(--text-secondary); }
+
+        .card-title {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+
+        .big-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: white;
+        }
+
+        .sub-value { font-size: 0.9rem; color: var(--text-secondary); }
+
+        /* Tableau */
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        th {
+            text-align: left;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 10px;
+        }
+
+        td {
+            padding: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        tr:last-child td { border-bottom: none; }
+
+        /* Logs */
+        .log-box {
+            height: 350px;
+            overflow-y: auto;
+            background: #0a0c10;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px;
+            font-size: 0.8rem;
+        }
+
+        .log-entry {
+            margin-bottom: 6px;
+            border-left: 2px solid var(--border-color);
+            padding-left: 8px;
+        }
+
+        .log-time { color: var(--text-secondary); margin-right: 8px; }
+
+        /* Couleurs utilitaires */
+        .text-green { color: var(--accent-green); }
+        .text-red { color: var(--accent-red); }
+        .text-blue { color: var(--accent-blue); }
+        .text-gold { color: var(--accent-gold); }
+
+        /* Tags */
+        .tag {
+            background: rgba(255,255,255,0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div>
+                <h1><span class="text-blue">👁️ OMEGA</span> SINGULARITY</h1>
+                <div style="margin-top:5px; font-size: 0.9rem; color: var(--text-secondary);">
+                    STATUS: <span style="color: white;">{{ status }}</span>
+                </div>
+            </div>
+            <div>
+                <span class="live-indicator"></span> SYSTÈME ONLINE
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <div class="card-title">CAPITAL TOTAL (NAV)</div>
+                <div class="big-value">${{ total_equity }}</div>
+                <div class="sub-value">Cash: ${{ cash }}</div>
+            </div>
+            <div class="card">
+                <div class="card-title">PERFORMANCE GLOBALE</div>
+                <div class="big-value {{ 'text-green' if total_pnl|float >= 0 else 'text-red' }}">
+                    {{ total_pnl }}$
+                </div>
+                <div class="sub-value">Depuis le début</div>
+            </div>
+            <div class="card">
+                <div class="card-title">PSYCHOLOGIE IA</div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                    <span>Confiance</span>
+                    <span class="text-blue">{{ confidence }}%</span>
+                </div>
+                <div style="width:100%; background:#30363d; height:4px; border-radius:2px; margin-bottom:10px;">
+                    <div style="width:{{ confidence }}%; background:var(--accent-blue); height:100%; border-radius:2px;"></div>
+                </div>
+                
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                    <span>Stress</span>
+                    <span class="text-red">{{ stress }}%</span>
+                </div>
+                <div style="width:100%; background:#30363d; height:4px; border-radius:2px;">
+                    <div style="width:{{ stress }}%; background:var(--accent-red); height:100%; border-radius:2px;"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid" style="grid-template-columns: 2fr 1fr;">
+            
+            <div style="display:flex; flex-direction:column; gap:20px;">
+                
+                <div class="card">
+                    <div class="card-title">POSITIONS ACTIVES</div>
+                    {% if holdings %}
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>ACTIF</th>
+                                    <th>QTÉ</th>
+                                    <th>ENTRÉE</th>
+                                    <th>PRIX ACTUEL</th>
+                                    <th>PnL LATENT</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for p in holdings %}
+                                <tr>
+                                    <td><b class="text-blue">{{ p.symbol }}</b></td>
+                                    <td>{{ p.qty }}</td>
+                                    <td>{{ p.entry }}</td>
+                                    <td>{{ p.current }}</td>
+                                    <td class="{{ 'text-green' if p.pnl >= 0 else 'text-red' }}">
+                                        {{ p.pnl }}$ ({{ p.pct }}%)
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div style="text-align:center; padding:30px; color:var(--text-secondary);">
+                        🔭 AUCUNE POSITION - SCANNING EN COURS
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="card">
+                    <div class="card-title">GÉNOME ACTUEL (Gen #{{ generation }})</div>
+                    <div style="display:flex; gap:15px;">
+                        <div class="tag">RSI Trigger: <b>< {{ genome.rsi_buy }}</b></div>
+                        <div class="tag">Stop Loss: <b>{{ genome.sl_mult }} ATR</b></div>
+                        <div class="tag">Take Profit: <b>{{ genome.tp_mult }} ATR</b></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">FLUX DE PENSÉE (NEURAL LOGS)</div>
+                <div class="log-box">
+                    {% for log in logs %}
+                    <div class="log-entry">
+                        {{ log }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

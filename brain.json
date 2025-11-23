@@ -1,87 +1,11 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "knowledge_base": {
-        "MID|BULL_STRONG|LOW": {
-            "wins": 53,
-            "total": 232
-        },
-        "MID|BULL_WEAK|LOW": {
-            "wins": 76,
-            "total": 242
-        },
-        "MID|BEAR_WEAK|LOW": {
-            "wins": 91,
-            "total": 264
-        },
-        "HIGH|BULL_STRONG|LOW": {
-            "wins": 48,
-            "total": 103
-        },
-        "MID|BEAR_STRONG|LOW": {
-            "wins": 120,
-            "total": 261
-        },
-        "MID|BEAR_WEAK|HIGH": {
-            "wins": 36,
-            "total": 116
-        },
-        "MID|BULL_STRONG|HIGH": {
-            "wins": 129,
-            "total": 338
-        },
-        "MID|BEAR_STRONG|HIGH": {
-            "wins": 161,
-            "total": 446
-        },
-        "HIGH|BULL_WEAK|LOW": {
-            "wins": 23,
-            "total": 34
-        },
-        "LOW|BEAR_STRONG|HIGH": {
-            "wins": 77,
-            "total": 145
-        },
-        "HIGH|BEAR_WEAK|LOW": {
-            "wins": 0,
-            "total": 6
-        },
-        "MID|BULL_WEAK|HIGH": {
-            "wins": 39,
-            "total": 108
-        },
-        "LOW|BEAR_WEAK|HIGH": {
-            "wins": 3,
-            "total": 4
-        },
-        "HIGH|BULL_STRONG|HIGH": {
-            "wins": 42,
-            "total": 65
-        },
-        "LOW|BEAR_STRONG|LOW": {
-            "wins": 0,
-            "total": 7
-        },
-        "LOW|BEAR_WEAK|LOW": {
-            "wins": 0,
-            "total": 3
-        },
-        "HIGH|BEAR_STRONG|HIGH": {
-            "wins": 10,
-            "total": 16
-        },
-        "HIGH|BEAR_WEAK|HIGH": {
-            "wins": 4,
-            "total": 5
-        },
-        "HIGH|BULL_WEAK|HIGH": {
-            "wins": 0,
-            "total": 2
-        },
-        "HIGH|BEAR_STRONG|LOW": {
-            "wins": 0,
-            "total": 3
-        }
+    "best_params": {
+        "rsi_buy": 47,
+        "stop_loss_mult": 2.0,
+        "take_profit_mult": 2.4
     },
-    "total_xp": 2400
+    "best_score": -1078.5143815186548,
+    "generation": 8
 }

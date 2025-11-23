@@ -2,11 +2,29 @@
     "cash": 50000.0,
     "holdings": {},
     "genome": {
-        "rsi_buy": 37,
-        "sl_mult": 1.3245485927478424,
-        "tp_mult": 3.4685614697552416
+        "rsi_buy": 40,
+        "sl_mult": 1.0,
+        "tp_mult": 3.8684210859807795
     },
-    "memory_bank": [],
+    "stats": {
+        "generation": 107,
+        "best_pnl": 68.78353223657254
+    },
+    "emotions": {
+        "confidence": 50.0,
+        "stress": 20.0
+    },
+    "karma": {
+        "NVDA": 10.0,
+        "TSLA": 10.0,
+        "AAPL": 10.0,
+        "AMZN": 10.0,
+        "AMD": 10.0,
+        "COIN": 10.0,
+        "MSTR": 10.0,
+        "GOOG": 10.0,
+        "META": 10.0
+    },
     "black_box": [
         "RSI35|LOSS",
         "RSI30|LOSS",
@@ -22,14 +40,8 @@
         "RSI40|LOSS",
         "RSI38|LOSS"
     ],
-    "stats": {
-        "generation": 63,
-        "best_pnl": 63.448847294981135
-    },
-    "emotions": {
-        "confidence": 50.0,
-        "stress": 20.0
-    },
+    "total_pnl": 0.0,
+    "memory_bank": [],
     "best_params": {
         "rsi_buy": 48,
         "stop_loss_mult": 1.1,

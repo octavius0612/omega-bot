@@ -1,7 +1,7 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": 600.0,
+    "paper_cash": 400.0,
     "paper_holdings": {
         "AMD": {
             "qty": 2.0,
@@ -22,7 +22,7 @@
         "tp_mult": 3.8
     },
     "stats": {
-        "generation": 192,
+        "generation": 217,
         "best_pnl": 88.31335619643426
     },
     "emotions": {

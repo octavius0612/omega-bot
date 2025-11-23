@@ -1,9 +1,15 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": 800.0,
+    "paper_cash": 600.0,
     "paper_holdings": {
         "AMD": {
+            "qty": 2.0,
+            "entry": 100.0,
+            "stop": 98.0,
+            "tp": 107.6
+        },
+        "NVDA": {
             "qty": 2.0,
             "entry": 100.0,
             "stop": 98.0,
@@ -16,7 +22,7 @@
         "tp_mult": 3.8
     },
     "stats": {
-        "generation": 155,
+        "generation": 192,
         "best_pnl": 88.31335619643426
     },
     "emotions": {

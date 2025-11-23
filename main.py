@@ -27,11 +27,13 @@ app = Flask(__name__)
 # --- 1. CLÉS ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+HEARTBEAT_WEBHOOK_URL = os.environ.get("HEARTBEAT_WEBHOOK_URL")
+LEARNING_WEBHOOK_URL = os.environ.get("LEARNING_WEBHOOK_URL")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO_NAME = os.environ.get("REPO_NAME")
 
 # --- 2. CONFIGURATION ---
-WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR", "GOOG"]
+WATCHLIST = ["NVDA", "TSLA", "AAPL", "AMZN", "AMD", "COIN", "MSTR", "GOOG", "META"]
 INITIAL_CAPITAL = 50000.0 
 
 brain = {
@@ -39,7 +41,9 @@ brain = {
     "holdings": {}, 
     "trade_history": [],
     "total_pnl": 0.0,
-    "emotions": {"confidence": 50.0, "stress": 20.0}
+    "emotions": {"confidence": 50.0, "stress": 20.0},
+    "q_table": {},
+    "karma": {s: 10.0 for s in WATCHLIST}
 }
 
 bot_state = {
@@ -50,10 +54,60 @@ bot_state = {
     "positions": []
 }
 
+log_queue = queue.Queue()
+
 if GEMINI_API_KEY: genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# --- 3. CLASSE "GHOST BROKER" ---
+# --- 3. LOGGING & COMMS ---
+def fast_log(text):
+    log_queue.put(text)
+
+def logger_worker():
+    buffer = []
+    last_send = time.time()
+    while True:
+        try:
+            while not log_queue.empty():
+                buffer.append(log_queue.get())
+            if buffer and (len(buffer) > 5 or time.time() - last_send > 2.0):
+                msg_block = "\n".join(buffer[:15])
+                buffer = buffer[15:]
+                if LEARNING_WEBHOOK_URL:
+                    requests.post(LEARNING_WEBHOOK_URL, json={"content": msg_block})
+                last_send = time.time()
+            time.sleep(0.5)
+        except: time.sleep(1)
+
+def run_heartbeat():
+    while True:
+        if HEARTBEAT_WEBHOOK_URL: requests.post(HEARTBEAT_WEBHOOK_URL, json={"content": "💓"})
+        time.sleep(30)
+
+# --- 4. MÉMOIRE ---
+def load_brain():
+    global brain
+    try:
+        g = Github(GITHUB_TOKEN)
+        repo = g.get_repo(REPO_NAME)
+        c = repo.get_contents("brain.json")
+        loaded = json.loads(c.decoded_content.decode())
+        if "cash" in loaded: brain.update(loaded)
+    except: pass
+
+def save_brain():
+    try:
+        g = Github(GITHUB_TOKEN)
+        repo = g.get_repo(REPO_NAME)
+        content = json.dumps(brain, indent=4)
+        try:
+            f = repo.get_contents("brain.json")
+            repo.update_file("brain.json", "God Save", content, f.sha)
+        except:
+            repo.create_file("brain.json", "Init", content)
+    except: pass
+
+# --- 5. CLASSE GHOST BROKER ---
 class GhostBroker:
     def get_price(self, symbol):
         try: return yf.Ticker(symbol).fast_info['last_price']
@@ -84,7 +138,6 @@ class GhostBroker:
                     brain['holdings'][symbol] = {"qty": new_qty, "avg_price": new_avg}
                 else:
                     brain['holdings'][symbol] = {"qty": qty, "avg_price": price}
-                
                 self.log(f"🟢 ACHAT {symbol}", reason, price)
                 return True
 
@@ -94,11 +147,9 @@ class GhostBroker:
                 revenue = pos['qty'] * price
                 cost = pos['qty'] * pos['avg_price']
                 pnl = revenue - cost
-                
                 brain['cash'] += revenue
                 brain['total_pnl'] += pnl
                 del brain['holdings'][symbol]
-                
                 self.log(f"🔴 VENTE {symbol} ({pnl:+.2f}$)", reason, price)
                 return True
         return False
@@ -114,7 +165,7 @@ class GhostBroker:
 
 broker = GhostBroker()
 
-# --- 4. MODULES INTELLIGENTS ---
+# --- 6. MODULES INTELLIGENCE ---
 def run_monte_carlo(prices):
     try:
         returns = prices.pct_change().dropna()
@@ -162,38 +213,15 @@ def consult_council(s, rsi, mc, vis, social, whale):
     Si Baleine ET RSI < 30 : ACHAT FORT.
     Sinon : ATTENTE.
     
-    JSON: {{"vote": "BUY/WAIT", "reason": "Synthèse courte"}}
+    JSON: {{"vote": "BUY/WAIT", "reason": "Synthèse"}}
     """
     try:
         res = model.generate_content(prompt)
         return json.loads(res.text.replace("```json","").replace("```",""))
     except: return {"vote": "WAIT", "reason": "Erreur IA"}
 
-# --- 5. PERSISTANCE ---
-def load_brain():
-    global brain
-    try:
-        g = Github(GITHUB_TOKEN)
-        repo = g.get_repo(REPO_NAME)
-        c = repo.get_contents("brain.json")
-        loaded = json.loads(c.decoded_content.decode())
-        if "cash" in loaded: brain.update(loaded)
-    except: pass
-
-def save_brain():
-    try:
-        g = Github(GITHUB_TOKEN)
-        repo = g.get_repo(REPO_NAME)
-        content = json.dumps(brain, indent=4)
-        try:
-            f = repo.get_contents("brain.json")
-            repo.update_file("brain.json", "Save", content, f.sha)
-        except:
-            repo.create_file("brain.json", "Init", content)
-    except: pass
-
-# --- 6. MOTEUR PRINCIPAL (C'est ici que j'ai corrigé le nom) ---
-def run_trading_engine():
+# --- 7. MOTEUR TRADING ---
+def run_trading():
     global bot_state, brain
     load_brain()
     print("MOTEUR DÉMARRÉ.")
@@ -205,11 +233,16 @@ def run_trading_engine():
             bot_state['equity'] = eq
             bot_state['positions'] = positions
             
-            # Horaires Bourse
+            # Horaires
             nyc = pytz.timezone('America/New_York')
             now = datetime.now(nyc)
-            if not (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0)):
+            market_open = (now.weekday() < 5 and dtime(9,30) <= now.time() <= dtime(16,0))
+            
+            if not market_open:
                 bot_state['status'] = "🌙 Marché Fermé"
+                # Mode Simulation/Apprentissage Nuit
+                s = random.choice(WATCHLIST)
+                fast_log(f"💤 **SIMULATION:** Analyse théorique sur {s} (Entraînement neuronal)...")
                 time.sleep(60)
                 continue
                 
@@ -237,7 +270,10 @@ def run_trading_engine():
                         
                         rsi = ta.rsi(df['Close'], length=14).iloc[-1]
                         
+                        # Premier filtre technique rapide
                         if rsi < 40: 
+                            fast_log(f"🔎 **SCAN {s}:** RSI bas ({rsi:.1f}). Lancement analyse profonde...")
+                            
                             mc = run_monte_carlo(df['Close'])
                             vis = get_vision_score(df)
                             soc = get_social_hype(s)
@@ -245,6 +281,8 @@ def run_trading_engine():
                             
                             council = consult_council(s, rsi, mc, vis, soc, whl)
                             bot_state['last_decision'] = f"{s}: {council['vote']}"
+                            
+                            fast_log(f"🧠 **RÉSULTAT {s}:** MC:{mc:.2f} | Vis:{vis:.2f} | Conseil:{council['vote']}")
                             
                             if council['vote'] == "BUY":
                                 qty = 500 / df['Close'].iloc[-1]
@@ -254,16 +292,16 @@ def run_trading_engine():
             
             time.sleep(60)
         except Exception as e:
-            print(f"Erreur: {e}")
+            print(f"Erreur Loop: {e}")
             time.sleep(10)
 
-# --- 7. DASHBOARD WEB ---
+# --- 8. DASHBOARD WEB ---
 HTML = """
 <!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta http-equiv="refresh" content="10">
-    <title>SUPREME ENTITY</title>
+    <title>OMNI-GOD V66</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         .card { border: 1px solid #333; padding: 15px; margin-bottom: 20px; }
@@ -273,7 +311,7 @@ HTML = """
     </style>
 </head>
 <body>
-    <h1>👁️ THE SUPREME ENTITY V65</h1>
+    <h1>👁️ THE OMNI-GOD V66</h1>
     <div class="card">
         <h3>STATUS: {{ status }}</h3>
         <h2>CAPITAL: ${{ equity }}</h2>
@@ -309,8 +347,9 @@ def index():
     )
 
 def start():
-    # C'est ici que j'ai corrigé le nom de la fonction appelée
-    threading.Thread(target=run_trading_engine, daemon=True).start()
+    threading.Thread(target=run_trading, daemon=True).start()
+    threading.Thread(target=run_heartbeat, daemon=True).start()
+    threading.Thread(target=logger_worker, daemon=True).start()
 
 start()
 

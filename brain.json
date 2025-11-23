@@ -2,10 +2,10 @@
     "cash": 50000.0,
     "holdings": {},
     "best_params": {
-        "rsi_buy": 47,
-        "stop_loss_mult": 2.0,
-        "take_profit_mult": 2.4
+        "rsi_buy": 48,
+        "stop_loss_mult": 1.1,
+        "take_profit_mult": 4.0
     },
-    "best_score": -1078.5143815186548,
-    "generation": 8
+    "best_score": -878.5711905778426,
+    "generation": 18
 }

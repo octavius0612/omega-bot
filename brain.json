@@ -35,12 +35,12 @@
         }
     },
     "genome": {
-        "rsi_buy": 47,
+        "rsi_buy": 49,
         "sl_mult": 1.7
     },
     "stats": {
-        "generation": 504,
-        "best_pnl": 122.70065540846599
+        "generation": 555,
+        "best_pnl": 126.65243401737644
     },
     "emotions": {
         "confidence": 50.0,

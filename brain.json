@@ -1,7 +1,7 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": -533.639005418424,
+    "paper_cash": -428.57824062574076,
     "paper_holdings": {
         "AMD": {
             "qty": 2.0,
@@ -35,12 +35,12 @@
         }
     },
     "genome": {
-        "rsi_buy": 52,
-        "sl_mult": 1.5
+        "rsi_buy": 47,
+        "sl_mult": 1.7
     },
     "stats": {
-        "generation": 415,
-        "best_pnl": 99.18045724070694
+        "generation": 504,
+        "best_pnl": 122.70065540846599
     },
     "emotions": {
         "confidence": 50.0,

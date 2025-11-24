@@ -1,15 +1,8 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": 2212.0798404289467,
-    "paper_holdings": {
-        "AAPL": {
-            "qty": 2.0,
-            "entry": 100.0,
-            "stop": 96.2,
-            "tp": 108.6
-        }
-    },
+    "paper_cash": 2761.999823339103,
+    "paper_holdings": {},
     "genome": {
         "rsi_buy": 49,
         "sl_mult": 1.7

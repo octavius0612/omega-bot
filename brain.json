@@ -1,14 +1,8 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": 989.6597964836342,
+    "paper_cash": 2212.0798404289467,
     "paper_holdings": {
-        "META": {
-            "qty": 2.0,
-            "entry": 100.0,
-            "stop": 96.2,
-            "tp": 108.6
-        },
         "AAPL": {
             "qty": 2.0,
             "entry": 100.0,

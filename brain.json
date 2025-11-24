@@ -1,7 +1,7 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": -600.0,
+    "paper_cash": -533.639005418424,
     "paper_holdings": {
         "AMD": {
             "qty": 2.0,
@@ -35,13 +35,12 @@
         }
     },
     "genome": {
-        "rsi_buy": 49,
-        "sl_mult": 1.9,
-        "tp_mult": 4.3
+        "rsi_buy": 52,
+        "sl_mult": 1.5
     },
     "stats": {
-        "generation": 339,
-        "best_pnl": 92.21972664055295
+        "generation": 415,
+        "best_pnl": 99.18045724070694
     },
     "emotions": {
         "confidence": 50.0,
@@ -58,6 +57,7 @@
         "GOOG": 10.0,
         "META": 10.0
     },
+    "trade_history": [],
     "black_box": [
         "RSI35|LOSS",
         "RSI30|LOSS",

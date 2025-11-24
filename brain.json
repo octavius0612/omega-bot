@@ -1,14 +1,8 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": -428.57824062574076,
+    "paper_cash": -1.6982357429282615,
     "paper_holdings": {
-        "AMD": {
-            "qty": 2.0,
-            "entry": 100.0,
-            "stop": 96.2,
-            "tp": 108.6
-        },
         "NVDA": {
             "qty": 2.0,
             "entry": 100.0,
@@ -38,14 +32,6 @@
         "rsi_buy": 49,
         "sl_mult": 1.7
     },
-    "stats": {
-        "generation": 555,
-        "best_pnl": 126.65243401737644
-    },
-    "emotions": {
-        "confidence": 50.0,
-        "stress": 20.0
-    },
     "karma": {
         "NVDA": 10.0,
         "TSLA": 10.0,
@@ -57,7 +43,6 @@
         "GOOG": 10.0,
         "META": 10.0
     },
-    "trade_history": [],
     "black_box": [
         "RSI35|LOSS",
         "RSI30|LOSS",
@@ -73,8 +58,17 @@
         "RSI40|LOSS",
         "RSI38|LOSS"
     ],
-    "learning_journal": [],
+    "stats": {
+        "generation": 555,
+        "best_pnl": 126.65243401737644
+    },
+    "emotions": {
+        "confidence": 50.0,
+        "stress": 20.0
+    },
     "total_pnl": 0.0,
+    "trade_history": [],
+    "learning_journal": [],
     "memory_bank": [],
     "best_params": {
         "rsi_buy": 48,

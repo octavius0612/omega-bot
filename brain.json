@@ -1,14 +1,8 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": -1.6982357429282615,
+    "paper_cash": 362.25977206957174,
     "paper_holdings": {
-        "NVDA": {
-            "qty": 2.0,
-            "entry": 100.0,
-            "stop": 98.0,
-            "tp": 107.6
-        },
         "GOOG": {
             "qty": 2.0,
             "entry": 100.0,

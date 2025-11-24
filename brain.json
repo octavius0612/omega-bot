@@ -1,14 +1,8 @@
 {
     "cash": 50000.0,
     "holdings": {},
-    "paper_cash": 362.25977206957174,
+    "paper_cash": 989.6597964836342,
     "paper_holdings": {
-        "GOOG": {
-            "qty": 2.0,
-            "entry": 100.0,
-            "stop": 98.0,
-            "tp": 107.6
-        },
         "META": {
             "qty": 2.0,
             "entry": 100.0,

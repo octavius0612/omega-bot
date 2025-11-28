@@ -15,4 +15,3 @@ mplfinance
 Pillow
 websocket-client
 scikit-learn
-statsmodels

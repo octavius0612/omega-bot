@@ -4,11 +4,11 @@
     "paper_cash": 2761.999823339103,
     "paper_holdings": {},
     "genome": {
-        "rsi_buy": 37,
+        "rsi_buy": 32,
         "sl_mult": 2.36,
-        "tp_mult": 4.8,
-        "ai_confidence": 0.83,
-        "last_update": "2025-11-28 20:30"
+        "tp_mult": 4.37,
+        "ai_confidence": 0.98,
+        "last_update": "2025-11-28 20:35"
     },
     "karma": {
         "NVDA": 10.0,
@@ -56,10 +56,10 @@
     "best_score": -878.5711905778426,
     "generation": 18,
     "deep_genome": {
-        "rsi_buy": 37,
+        "rsi_buy": 32,
         "sl_mult": 2.36,
-        "tp_mult": 4.8,
-        "ai_confidence": 0.83,
-        "last_update": "2025-11-28 20:30"
+        "tp_mult": 4.37,
+        "ai_confidence": 0.98,
+        "last_update": "2025-11-28 20:35"
     }
 }
